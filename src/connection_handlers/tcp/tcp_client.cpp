@@ -79,40 +79,40 @@ void TcpClient::disconnect() {
 }
 
 
-void TcpClient::subscribe(const std::string& code) {
+void TcpClient::subscribe(const std::string& product) {
     if (!connected_.load()) {
         handle_error("Cannot subscribe: not connected to server");
         return;
     }
 
     auto subscribe_msg = SubscribeRequestMsg{
-        .subscribe = true, .code = code
+        .subscribe = true, .product = product
     };
 
     std::string json_buffer;
     auto ec = glz::write_json(subscribe_msg, json_buffer);
     if (ec) {
-        LOG_WARNING(logger_, "Failed write_json for the subscribe msg of code {}", code);
+        LOG_WARNING(logger_, "Failed write_json for the subscribe msg of product {}", product);
     } else {
         send_message(json_buffer);
     }
 }
 
 
-void TcpClient::unsubscribe(const std::string& code) {
+void TcpClient::unsubscribe(const std::string& product) {
     if (!connected_.load()) {
         handle_error("Cannot unsubscribe: not connected to server");
         return;
     }
 
     auto unsubscribe_msg = SubscribeRequestMsg{
-        .subscribe = false, .code = code
+        .subscribe = false, .product = product
     };
 
     std::string json_buffer;
     auto ec = glz::write_json(unsubscribe_msg, json_buffer);
     if (ec) {
-        LOG_WARNING(logger_, "Failed write_json for the unsubscribe msg of code {}", code);
+        LOG_WARNING(logger_, "Failed write_json for the unsubscribe msg of product {}", product);
     } else {
         send_message(json_buffer);
     }
@@ -230,7 +230,7 @@ void TcpClient::handle_message(const std::string& message) {
             task_queue_->enqueue(Omni::Trader::TcpSubscribeUpdate{
                 .subscribe = subscribe_response.subscribe,
                 .success = subscribe_response.success,
-                .code = subscribe_response.code
+                .product = subscribe_response.product
             });
         } else if (feed_classifier.feed == "orderbook") {
             OrderbookMsg orderbook_msg;
@@ -241,7 +241,7 @@ void TcpClient::handle_message(const std::string& message) {
             }
             task_queue_->enqueue(Omni::Trader::TcpMarketDataResponse{
                 .feed = Omni::Trader::TcpMarketDataResponse::Orderbook,
-                .code = orderbook_msg.code,
+                .product = orderbook_msg.product,
                 .data = orderbook_msg.orderbook_data
             });
         } else if (feed_classifier.feed == "trade") {
@@ -253,7 +253,7 @@ void TcpClient::handle_message(const std::string& message) {
             }
             task_queue_->enqueue(Omni::Trader::TcpMarketDataResponse{
                 .feed = Omni::Trader::TcpMarketDataResponse::Trade,
-                .code = trade_msg.code,
+                .product = trade_msg.product,
                 .data = trade_msg.trade_data
             });
         } else if (feed_classifier.feed == "execution") {
@@ -265,7 +265,7 @@ void TcpClient::handle_message(const std::string& message) {
             }
             task_queue_->enqueue(Omni::Trader::TcpMarketDataResponse{
                 .feed = Omni::Trader::TcpMarketDataResponse::Execution,
-                .code = execution_msg.code,
+                .product = execution_msg.product,
                 .data = execution_msg.execution_data
             });
         } else if (feed_classifier.feed == "position") {
@@ -277,7 +277,7 @@ void TcpClient::handle_message(const std::string& message) {
             }
             task_queue_->enqueue(Omni::Trader::TcpMarketDataResponse{
                 .feed = Omni::Trader::TcpMarketDataResponse::Position,
-                .code = position_msg.code,
+                .product = position_msg.product,
                 .data = position_msg.position_data
             });
         }

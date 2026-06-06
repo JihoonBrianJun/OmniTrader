@@ -12,7 +12,7 @@ class KoreanStockOrderGateway : public BaseOrderGateway {
         ) override;
 
     private:
-        std::string convert_code_for_order(const std::string& code) override;
+        std::string convert_product_for_order(const std::string& product) override;
 
         void write_balance_url() override;
         void write_order_place_url() override;

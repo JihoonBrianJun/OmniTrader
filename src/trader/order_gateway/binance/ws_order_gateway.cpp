@@ -15,12 +15,12 @@ WsOrderGateway::WsOrderGateway(
     quill::Logger* logger,
     const std::string& ws_api_domain,
     std::shared_ptr<Omni::Config::ISigner> signer,
-    std::shared_ptr<SymbolManager> symbol_manager
+    std::shared_ptr<ProductManager> product_manager
 )
 :   logger_(logger),
     ws_api_domain_(ws_api_domain),
     signer_(std::move(signer)),
-    symbol_manager_(std::move(symbol_manager)),
+    product_manager_(std::move(product_manager)),
     connected_(false),
     request_counter_(0)
 {
@@ -132,14 +132,14 @@ OG::OrderResponse WsOrderGateway::send_request(
 
 void WsOrderGateway::place_order(const OG::OrderPlaceInfo& info, OG::OrderResponse& response) {
     std::map<std::string, std::string> params{
-        {"symbol", info.code},
+        {"symbol", info.product},
         {"side", info.is_bid ? "BUY" : "SELL"},
         {"type", info.is_limit ? "LIMIT" : "MARKET"},
-        {"quantity", symbol_manager_->format_qty(info.code, info.qty)}
+        {"quantity", product_manager_->format_qty(info.product, info.qty)}
     };
     if (info.is_limit) {
         params["timeInForce"] = "GTC";
-        params["price"] = symbol_manager_->format_price(info.code, info.price);
+        params["price"] = product_manager_->format_price(info.product, info.price);
     }
     response = send_request("order.place", std::move(params));
 }
@@ -147,10 +147,10 @@ void WsOrderGateway::place_order(const OG::OrderPlaceInfo& info, OG::OrderRespon
 
 void WsOrderGateway::amend_order(const OG::OrderAmendInfo& info, OG::OrderResponse& response) {
     std::map<std::string, std::string> params{
-        {"symbol", info.code},
+        {"symbol", info.product},
         {"orderId", info.order_no},
-        {"quantity", symbol_manager_->format_qty(info.code, info.qty)},
-        {"price", symbol_manager_->format_price(info.code, info.price)}
+        {"quantity", product_manager_->format_qty(info.product, info.qty)},
+        {"price", product_manager_->format_price(info.product, info.price)}
     };
     response = send_request("order.modify", std::move(params));
 }
@@ -158,7 +158,7 @@ void WsOrderGateway::amend_order(const OG::OrderAmendInfo& info, OG::OrderRespon
 
 void WsOrderGateway::cancel_order(const OG::OrderCancelInfo& info, OG::OrderResponse& response) {
     std::map<std::string, std::string> params{
-        {"symbol", info.code},
+        {"symbol", info.product},
         {"orderId", info.order_no}
     };
     response = send_request("order.cancel", std::move(params));

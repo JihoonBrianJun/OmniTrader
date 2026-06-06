@@ -6,7 +6,7 @@
 #include <moodycamel/blockingconcurrentqueue.h>
 
 #include "connection_handlers/websocket/websocket_client.hpp"
-#include "market_listener/exchange/kis/code_manager_base.hpp"
+#include "market_listener/exchange/kis/product_manager_base.hpp"
 #include "market_listener/exchange/kis/kis_listener_dtypes.hpp"
 
 
@@ -21,12 +21,12 @@ class KisWebsocketClient : public Omni::Connection::BaseWebsocketClient<Omni::Co
         KisWebsocketClient(
             const std::string& uri, quill::Logger* logger,
             moodycamel::BlockingConcurrentQueue<WsResponse>* queue,
-            std::shared_ptr<Omni::KIS::CodeManager::ICodeManager> code_manager
+            std::shared_ptr<Omni::KIS::ProductManager::IProductManager> product_manager
         );
 
     private:
         moodycamel::BlockingConcurrentQueue<WsResponse>* queue_;
-        std::shared_ptr<Omni::KIS::CodeManager::ICodeManager> code_manager_;
+        std::shared_ptr<Omni::KIS::ProductManager::IProductManager> product_manager_;
 
         std::string ws_iv_, ws_key_;
 

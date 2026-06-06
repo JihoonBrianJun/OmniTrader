@@ -5,7 +5,7 @@
 
 #include "config_handlers/config_utils.hpp"
 #include "config_handlers/kis/kis_config.hpp"
-#include "market_listener/exchange/kis/code_manager.hpp"
+#include "market_listener/exchange/kis/product_manager.hpp"
 #include "market_listener/exchange/kis/kis_listener.hpp"
 
 
@@ -15,7 +15,7 @@ template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
 template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 namespace KCfg = Omni::KIS::Config;
-namespace CM = Omni::KIS::CodeManager;
+namespace CM = Omni::KIS::ProductManager;
 
 
 KisListener::KisListener(
@@ -38,7 +38,7 @@ KisListener::KisListener(
     ws_domain_ = Omni::Config::get_domain(KCfg::EXCHANGE, ws_domain_type).second;
     hts_id_ = KCfg::get_account_info().second.hts_id;
 
-    create_code_manager();
+    create_product_manager();
 }
 
 
@@ -47,32 +47,32 @@ KisListener::~KisListener() {
 }
 
 
-void KisListener::create_code_manager() {
-    auto codes_db_path = fmt::format(
-        "{}/{}/{}", config_.codes_db_base_path, config_.region, config_.market_type
+void KisListener::create_product_manager() {
+    auto products_db_path = fmt::format(
+        "{}/{}/{}", config_.products_db_base_path, config_.region, config_.market_type
     );
 
     if (config_.market_type == "derivatives") {
-        code_manager_ = std::make_shared<Omni::KIS::KoreanDerivatives::CodeManager>(
-            config_.codes, codes_db_path, hts_id_, config_.is_night, logger_
+        product_manager_ = std::make_shared<Omni::KIS::KoreanDerivatives::ProductManager>(
+            config_.products, products_db_path, hts_id_, config_.is_night, logger_
         );
     }
-    if (code_manager_ == nullptr) {
+    if (product_manager_ == nullptr) {
         throw std::runtime_error(fmt::format(
             "KIS market type {} not supported", config_.market_type
         ));
     }
 
     subscription_messages_.clear();
-    for (const auto& code : config_.codes) {
+    for (const auto& product : config_.products) {
         subscription_messages_.emplace_back(write_ws_request_msg(
-            code_manager_->get_orderbook_subscription_input(code)
+            product_manager_->get_orderbook_subscription_input(product)
         ));
         subscription_messages_.emplace_back(write_ws_request_msg(
-            code_manager_->get_trade_subscription_input(code)
+            product_manager_->get_trade_subscription_input(product)
         ));
         subscription_messages_.emplace_back(write_ws_request_msg(
-            code_manager_->get_execution_subscription_input(code)
+            product_manager_->get_execution_subscription_input(product)
         ));
     }
 }
@@ -80,7 +80,7 @@ void KisListener::create_code_manager() {
 
 void KisListener::create_ws_client() {
     ws_client_ = std::make_unique<KisWebsocketClient>(
-        ws_domain_, logger_, &ws_response_queue_, code_manager_
+        ws_domain_, logger_, &ws_response_queue_, product_manager_
     );
 }
 
@@ -199,26 +199,26 @@ void KisListener::on_market_data(const WsMarketDataResponse& response) {
 
         switch (response.tr_id_type) {
             case CM::TrIdType::OrderbookTrId: {
-                const auto& code = market_data[data_offset];
+                const auto& product = market_data[data_offset];
                 Omni::OrderbookMsg parsed_msg;
-                data_offset += code_manager_->parse_orderbook_data(
-                    code, data_offset, market_data, parsed_msg
+                data_offset += product_manager_->parse_orderbook_data(
+                    product, data_offset, market_data, parsed_msg
                 );
                 event_queue_->enqueue(parsed_msg);
                 break;
             }
             case CM::TrIdType::TradeTrId: {
-                const auto& code = market_data[data_offset];
+                const auto& product = market_data[data_offset];
                 Omni::TradeMsg parsed_msg;
-                data_offset += code_manager_->parse_trade_data(
-                    code, data_offset, market_data, parsed_msg
+                data_offset += product_manager_->parse_trade_data(
+                    product, data_offset, market_data, parsed_msg
                 );
                 event_queue_->enqueue(parsed_msg);
                 break;
             }
             case CM::TrIdType::ExecutionTrId: {
                 Omni::ExecutionMsg parsed_msg;
-                data_offset += code_manager_->parse_execution_data(
+                data_offset += product_manager_->parse_execution_data(
                     data_offset, market_data, parsed_msg
                 );
                 event_queue_->enqueue(parsed_msg);

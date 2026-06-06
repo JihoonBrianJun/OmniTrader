@@ -8,7 +8,7 @@ struct OrderPlaceInfo {
     bool is_bid;
     double price;
     double qty;
-    std::string code;
+    std::string product;
 };
 
 struct OrderAmendInfo {
@@ -17,7 +17,7 @@ struct OrderAmendInfo {
     bool is_limit = true;
     double price = 0.0;
     double qty = 0.0;
-    std::string code = "";
+    std::string product = "";
 };
 
 struct OrderCancelInfo {
@@ -25,12 +25,12 @@ struct OrderCancelInfo {
     bool cancel_all = true;
     bool is_limit = true;
     double qty = 0.0;
-    std::string code = "";
+    std::string product = "";
 };
 
 struct OrderResponse {
     bool success = false;
-    std::string code = "";
+    std::string code = "";   // exchange response/message code (not an instrument)
     std::string msg = "";
     std::string order_no = "";
 };

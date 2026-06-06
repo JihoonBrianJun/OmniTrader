@@ -17,7 +17,7 @@ struct TcpStatusUpdate {
 struct TcpSubscribeUpdate {
     bool subscribe;
     bool success;
-    std::string code;
+    std::string product;
 };
 
 struct TcpMarketDataResponse {
@@ -28,12 +28,12 @@ struct TcpMarketDataResponse {
         Position,
         Error
     } feed;
-    std::string code;
+    std::string product;
     std::variant<OrderbookData, TradeData, ExecutionData, PositionData> data;
 };
 
 struct OrderUpdate {
-    std::string code;
+    std::string product;
 };
 
 using Task = std::variant<
@@ -47,9 +47,9 @@ struct TraderConfig {
     std::string region = "";
     std::string market_type = "derivatives";
     std::string product = "BTCUSDT";
-    std::vector<std::string> trade_codes = {"BTCUSDT"};
-    bool subscribe_same_codes = true;
-    std::vector<std::string> subscribe_codes = {"BTCUSDT"};
+    std::vector<std::string> trade_products = {"BTCUSDT"};
+    bool subscribe_same_products = true;
+    std::vector<std::string> subscribe_products = {"BTCUSDT"};
     std::string broadcast_host_address = "0.0.0.0";
     unsigned short broadcast_port = 8888;
     std::string http_domain_type = "rest_real";
@@ -73,10 +73,10 @@ struct TraderConfig {
         program.add_argument("--region").default_value(std::string(""));
         program.add_argument("--market_type").default_value(std::string("derivatives"));
         program.add_argument("--product").default_value(std::string("BTCUSDT"));
-        program.add_argument("--trade_codes")
+        program.add_argument("--trade_products")
             .nargs(argparse::nargs_pattern::any)
             .default_value(std::vector<std::string>{"BTCUSDT"});
-        program.add_argument("--subscribe_codes")
+        program.add_argument("--subscribe_products")
             .nargs(argparse::nargs_pattern::any)
             .default_value(std::vector<std::string>{});
         program.add_argument("--broadcast_host_address").default_value(std::string("0.0.0.0"));
@@ -95,10 +95,10 @@ struct TraderConfig {
         region = program.get<std::string>("--region");
         market_type = program.get<std::string>("--market_type");
         product = program.get<std::string>("--product");
-        trade_codes = program.get<std::vector<std::string>>("--trade_codes");
-        subscribe_codes = program.get<std::vector<std::string>>("--subscribe_codes");
-        subscribe_same_codes = subscribe_codes.empty();
-        if (subscribe_same_codes) subscribe_codes = trade_codes;
+        trade_products = program.get<std::vector<std::string>>("--trade_products");
+        subscribe_products = program.get<std::vector<std::string>>("--subscribe_products");
+        subscribe_same_products = subscribe_products.empty();
+        if (subscribe_same_products) subscribe_products = trade_products;
         broadcast_host_address = program.get<std::string>("--broadcast_host_address");
         broadcast_port = static_cast<unsigned short>(program.get<int>("--broadcast_port"));
         http_domain_type = program.get<std::string>("--http_domain_type");

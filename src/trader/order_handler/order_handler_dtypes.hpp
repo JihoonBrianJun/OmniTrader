@@ -21,9 +21,9 @@ struct ResponseWaitingOrders {
     }
 };
 
-// Per-traded-code live state. Outstanding orders are keyed by an internal client
+// Per-traded-product live state. Outstanding orders are keyed by an internal client
 // id (cid, mirroring the backtest) and mapped to the exchange order id (order_no).
-struct CodeState {
+struct ProductState {
     L1 l1;
     int32_t position_in_lots = 0;
     std::map<uint32_t, OutstandingOrder> outstanding_orders;

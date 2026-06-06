@@ -29,7 +29,7 @@ class SnapshotFetcher {
             std::shared_ptr<Omni::Config::ISigner> signer
         );
 
-        DepthSnapshot fetch_depth(const std::string& symbol, int limit = 1000);
+        DepthSnapshot fetch_depth(const std::string& product, int limit = 1000);
 
         // Authoritative position snapshot (GET /fapi/v2/positionRisk).
         std::vector<Omni::PositionMsg> fetch_positions();

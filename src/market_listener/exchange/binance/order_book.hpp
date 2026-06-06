@@ -9,7 +9,7 @@
 
 namespace Omni::Binance {
 
-// Maintains one symbol's full order book from a REST snapshot + diff depth
+// Maintains one product's full order book from a REST snapshot + diff depth
 // stream, following Binance's U/u/pu sequencing rules. Out-of-sequence updates
 // flag the book as desynced so the listener can refetch a snapshot.
 class OrderBook {

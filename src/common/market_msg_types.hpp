@@ -13,14 +13,14 @@ namespace Omni {
 struct SubscribeRequestMsg {
     std::string feed = "subscribe";
     bool subscribe = false;
-    std::string code = "";
+    std::string product = "";
 };
 
 struct SubscribeResponseMsg {
     std::string feed = "subscribe";
     bool subscribe = false;
     bool success = false;
-    std::string code = "";
+    std::string product = "";
 };
 
 struct OrderbookLevel {
@@ -33,7 +33,7 @@ struct OrderbookData {
 };
 struct OrderbookMsg {
     std::string feed = "orderbook";
-    std::string code = "";
+    std::string product = "";
     OrderbookData orderbook_data = {};
 };
 
@@ -44,7 +44,7 @@ struct TradeData {
 };
 struct TradeMsg {
     std::string feed = "trade";
-    std::string code = "";
+    std::string product = "";
     TradeData trade_data = {};
 };
 
@@ -56,8 +56,8 @@ struct ExecutionData {
     std::string account_no = "";
     std::string order_no = "";
     std::string original_order_no = "";
-    std::string short_code = "";
-    std::string full_code = "";
+    std::string short_product = "";
+    std::string full_product = "";
     bool is_accept_data = false;   // an accept/ack/state-change (not a fill)
     bool is_place = false;         // a new order acceptance
     bool is_cancel = false;        // a cancel/expire acceptance
@@ -75,7 +75,7 @@ struct ExecutionData {
 };
 struct ExecutionMsg {
     std::string feed = "execution";
-    std::string code = "";
+    std::string product = "";
     ExecutionData execution_data = {};
 };
 
@@ -88,7 +88,7 @@ struct PositionData {
 };
 struct PositionMsg {
     std::string feed = "position";
-    std::string code = "";
+    std::string product = "";
     PositionData position_data = {};
 };
 

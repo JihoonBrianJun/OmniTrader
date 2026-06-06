@@ -42,7 +42,7 @@ private:
     double min_tick_size_, lot_size_;
     std::shared_ptr<BaseStrategy> strategy_;
 
-    const std::vector<std::string> trade_codes_, subscribe_codes_;
+    const std::vector<std::string> trade_products_, subscribe_products_;
     const std::string broadcast_host_address_;
     unsigned short broadcast_port_;
     long order_update_interval_ns_;
@@ -50,8 +50,8 @@ private:
     std::unique_ptr<Omni::OrderGateway::IOrderGateway> order_gateway_;
     Pricer pricer_;
 
-    std::map<std::string, CodeState> code_states_;
-    std::map<std::string, std::string> order_no_to_code_;
+    std::map<std::string, ProductState> product_states_;
+    std::map<std::string, std::string> order_no_to_product_;
 
     moodycamel::BlockingConcurrentQueue<Task> trader_queue_;
     std::unique_ptr<boost::asio::io_context> io_context_;
@@ -73,10 +73,10 @@ private:
     double to_double_price(int64_t price_in_min_ticks);
     double to_double_qty(int32_t qty_in_lots);
 
-    void on_orderbook(const std::string& code, const OrderbookData& data);
-    void on_execution(const std::string& code, const ExecutionData& data);
-    void on_position(const std::string& code, const PositionData& data);
-    void update_orders(const std::string& code);
+    void on_orderbook(const std::string& product, const OrderbookData& data);
+    void on_execution(const std::string& product, const ExecutionData& data);
+    void on_position(const std::string& product, const PositionData& data);
+    void update_orders(const std::string& product);
 };
 
 } // namespace Omni::Trader

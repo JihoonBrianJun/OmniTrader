@@ -11,17 +11,17 @@
 
 namespace Omni::Listener::KIS {
 
-namespace CM = Omni::KIS::CodeManager;
+namespace CM = Omni::KIS::ProductManager;
 
 
 KisWebsocketClient::KisWebsocketClient(
     const std::string& uri, quill::Logger* logger,
     moodycamel::BlockingConcurrentQueue<WsResponse>* queue,
-    std::shared_ptr<CM::ICodeManager> code_manager
+    std::shared_ptr<CM::IProductManager> product_manager
 )
 :   Base(uri, logger),
     queue_(queue),
-    code_manager_(code_manager)
+    product_manager_(product_manager)
 {
     set_handlers();
     init_connection(uri);
@@ -130,7 +130,7 @@ void KisWebsocketClient::on_stream_message(Base::message_ptr msg) {
             }
 
             std::vector<std::string> data_segments;
-            auto tr_id_type = code_manager_->get_tr_id_type(msg_segments[1]);
+            auto tr_id_type = product_manager_->get_tr_id_type(msg_segments[1]);
             if (tr_id_type == CM::TrIdType::ExecutionTrId) {
                 split_msg(aes_cbc_decrypt(msg_segments[3]), '^', data_segments);
             } else {

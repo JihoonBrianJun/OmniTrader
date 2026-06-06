@@ -14,7 +14,7 @@
 #include "config_handlers/signer.hpp"
 #include "market_listener/exchange/exchange_listener.hpp"
 #include "market_listener/exchange/binance/binance_ws_client.hpp"
-#include "market_listener/exchange/binance/symbol_manager.hpp"
+#include "market_listener/exchange/binance/product_manager.hpp"
 #include "market_listener/exchange/binance/order_book.hpp"
 #include "market_listener/exchange/binance/snapshot_fetcher.hpp"
 
@@ -49,10 +49,10 @@ class BinanceListener : public IExchangeListener {
         moodycamel::BlockingConcurrentQueue<ListenerEvent>* event_queue_;
 
         std::string rest_domain_, stream_domain_, domain_type_;
-        std::vector<std::string> symbols_;   // upper-case codes from config
+        std::vector<std::string> products_;   // upper-case products from config
 
         std::shared_ptr<Omni::Config::ISigner> signer_;
-        std::unique_ptr<OB::SymbolManager> symbol_manager_;
+        std::unique_ptr<OB::ProductManager> product_manager_;
         std::unique_ptr<OB::SnapshotFetcher> snapshot_fetcher_;
 
         std::map<std::string, OB::OrderBook> order_books_;
@@ -80,7 +80,7 @@ class BinanceListener : public IExchangeListener {
         void on_ws_status(const WsStatus& status);
         void on_market_open();
         void on_user_open();
-        void resync_order_book(const std::string& symbol);
+        void resync_order_book(const std::string& product);
 
         void handle_market_payload(const std::string& payload);
         void handle_user_payload(const std::string& payload);

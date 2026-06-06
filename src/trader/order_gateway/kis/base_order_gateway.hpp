@@ -43,7 +43,7 @@ class BaseOrderGateway : public OG::IOrderGateway {
 
         void initalize();
 
-        virtual std::string convert_code_for_order(const std::string& code) = 0;
+        virtual std::string convert_product_for_order(const std::string& product) = 0;
 
         virtual void write_balance_url() = 0;
         virtual void write_order_place_url() = 0;

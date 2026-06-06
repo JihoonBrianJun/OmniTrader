@@ -35,7 +35,7 @@ BinanceListener::BinanceListener(
     config_(config),
     event_queue_(event_queue),
     domain_type_(config.domain_type),
-    symbols_(config.codes),
+    products_(config.products),
     market_opened_(false),
     user_opened_(false),
     market_reconnect_cnt_(0),
@@ -47,11 +47,11 @@ BinanceListener::BinanceListener(
     stream_domain_ = OB::get_endpoint("ws_stream", domain_type_).second;
     signer_ = OB::make_signer();
 
-    symbol_manager_ = std::make_unique<OB::SymbolManager>(logger_, rest_domain_);
+    product_manager_ = std::make_unique<OB::ProductManager>(logger_, rest_domain_);
     snapshot_fetcher_ = std::make_unique<OB::SnapshotFetcher>(logger_, rest_domain_, signer_);
 
-    for (const auto& symbol : symbols_) {
-        order_books_[symbol] = OB::OrderBook{};
+    for (const auto& product : products_) {
+        order_books_[product] = OB::OrderBook{};
     }
 }
 
@@ -63,8 +63,8 @@ BinanceListener::~BinanceListener() {
 
 std::string BinanceListener::market_stream_url() const {
     std::string streams;
-    for (const auto& symbol : symbols_) {
-        auto s = to_lower(symbol);
+    for (const auto& product : products_) {
+        auto s = to_lower(product);
         if (!streams.empty()) streams += "/";
         streams += fmt::format("{}@bookTicker/{}@depth@100ms/{}@aggTrade", s, s, s);
     }
@@ -106,7 +106,7 @@ void BinanceListener::create_user_client() {
 void BinanceListener::start() {
     running_.store(true);
 
-    symbol_manager_->load();
+    product_manager_->load();
 
     io_thread_ = std::thread([this]() {
         auto work_guard = boost::asio::make_work_guard(*io_context_);
@@ -235,8 +235,8 @@ void BinanceListener::on_ws_status(const WsStatus& status) {
 void BinanceListener::on_market_open() {
     // (Re)bootstrap each order book from a REST snapshot; the diff stream then
     // keeps it in sequence.
-    for (const auto& symbol : symbols_) {
-        resync_order_book(symbol);
+    for (const auto& product : products_) {
+        resync_order_book(product);
     }
 }
 
@@ -253,18 +253,18 @@ void BinanceListener::on_user_open() {
 }
 
 
-void BinanceListener::resync_order_book(const std::string& symbol) {
-    auto& book = order_books_[symbol];
+void BinanceListener::resync_order_book(const std::string& product) {
+    auto& book = order_books_[product];
     book.mark_desynced();
-    auto snapshot = snapshot_fetcher_->fetch_depth(symbol);
+    auto snapshot = snapshot_fetcher_->fetch_depth(product);
     if (!snapshot.ok) {
-        LOG_WARNING(logger_, "Depth snapshot failed for {}; will retry on next diff", symbol);
+        LOG_WARNING(logger_, "Depth snapshot failed for {}; will retry on next diff", product);
         return;
     }
     book.apply_snapshot(snapshot.last_update_id, snapshot.bids, snapshot.asks);
 
     Omni::OrderbookMsg msg;
-    msg.code = symbol;
+    msg.product = product;
     msg.orderbook_data = book.to_data(config_.orderbook_levels);
     event_queue_->enqueue(std::move(msg));
 }
@@ -279,13 +279,13 @@ void BinanceListener::handle_market_payload(const std::string& payload) {
 
         if (event_type == "bookTicker") {
             Omni::OrderbookMsg msg;
-            msg.code = data.at("s").get<std::string>();
+            msg.product = data.at("s").get<std::string>();
             msg.orderbook_data.bid_book.push_back({sd(data, "b"), sd(data, "B")});
             msg.orderbook_data.ask_book.push_back({sd(data, "a"), sd(data, "A")});
             event_queue_->enqueue(std::move(msg));
         } else if (event_type == "depthUpdate") {
-            auto symbol = data.at("s").get<std::string>();
-            auto book_it = order_books_.find(symbol);
+            auto product = data.at("s").get<std::string>();
+            auto book_it = order_books_.find(product);
             if (book_it == order_books_.end()) return;
 
             std::vector<OB::OrderBook::PriceLevel> bids, asks;
@@ -303,18 +303,18 @@ void BinanceListener::handle_market_payload(const std::string& payload) {
 
             bool ok = book_it->second.apply_diff(U, u, pu, bids, asks);
             if (!ok) {
-                LOG_WARNING(logger_, "Order book desynced for {}; resyncing", symbol);
-                resync_order_book(symbol);
+                LOG_WARNING(logger_, "Order book desynced for {}; resyncing", product);
+                resync_order_book(product);
                 return;
             }
 
             Omni::OrderbookMsg msg;
-            msg.code = symbol;
+            msg.product = product;
             msg.orderbook_data = book_it->second.to_data(config_.orderbook_levels);
             event_queue_->enqueue(std::move(msg));
         } else if (event_type == "aggTrade") {
             Omni::TradeMsg msg;
-            msg.code = data.at("s").get<std::string>();
+            msg.product = data.at("s").get<std::string>();
             msg.trade_data.trade_price = sd(data, "p");
             msg.trade_data.cum_trade_qty = sd(data, "q");
             event_queue_->enqueue(std::move(msg));
@@ -333,7 +333,7 @@ void BinanceListener::handle_user_payload(const std::string& payload) {
         if (event_type == "ORDER_TRADE_UPDATE") {
             const auto& o = j.at("o");
             Omni::ExecutionMsg msg;
-            msg.code = o.at("s").get<std::string>();
+            msg.product = o.at("s").get<std::string>();
             auto& d = msg.execution_data;
             d.update_position_on_fill = false;   // ACCOUNT_UPDATE is authoritative
             d.order_no = std::to_string(o.at("i").get<long>());
@@ -367,7 +367,7 @@ void BinanceListener::handle_user_payload(const std::string& payload) {
             if (!a.contains("P")) return;
             for (const auto& p : a.at("P")) {
                 Omni::PositionMsg msg;
-                msg.code = p.at("s").get<std::string>();
+                msg.product = p.at("s").get<std::string>();
                 msg.position_data.position_amt = sd(p, "pa");
                 msg.position_data.entry_price = sd(p, "ep");
                 msg.position_data.unrealized_pnl = sd(p, "up");

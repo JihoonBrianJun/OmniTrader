@@ -38,7 +38,7 @@ The trader is structured as **pricer → strategy → order_handler** (mirroring
 from the live L1, [strategy/](src/trader/strategy/) (`BaseStrategy`/`GeuantStrategy`
 with `make_decision`) decides orders in tick/lot units, and
 [order_handler/](src/trader/order_handler/) maps those to the `IOrderGateway` and
-tracks per-code position/outstanding state. CLI parsing uses the `argparse`
+tracks per-product position/outstanding state. CLI parsing uses the `argparse`
 library.
 
 Key generic seams: `Omni::Listener::IExchangeListener`
@@ -68,17 +68,17 @@ libcurl, websocketpp, concurrentqueue, openssl) are resolved by conan.
 
 ```bash
 # terminal 1
-./build/listener --exchange binance --domain_type test --codes BTCUSDT --broadcast_port 8888
+./build/listener --exchange binance --domain_type test --products BTCUSDT --broadcast_port 8888
 # terminal 2
-./build/trader --exchange binance --http_domain_type rest_test --trade_codes BTCUSDT \
+./build/trader --exchange binance --http_domain_type rest_test --trade_products BTCUSDT \
     --min_tick_size 0.1 --lot_size 0.001 --broadcast_port 8888
 ```
 
 ## Run (KIS)
 
 ```bash
-./build/listener --exchange kis --region korea --market_type derivatives --codes 101W12
-./build/trader  --exchange kis --region korea --market_type stock --trade_codes 005930
+./build/listener --exchange kis --region korea --market_type derivatives --products 101W12
+./build/trader  --exchange kis --region korea --market_type stock --trade_products 005930
 ```
 
 ## Status / scope

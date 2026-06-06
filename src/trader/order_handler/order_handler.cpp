@@ -40,8 +40,8 @@ OrderHandler::OrderHandler(
     min_tick_size_(market_config.min_tick_size),
     lot_size_(market_config.lot_size),
     strategy_(strategy),
-    trade_codes_(config.trade_codes),
-    subscribe_codes_(config.subscribe_same_codes ? config.trade_codes : config.subscribe_codes),
+    trade_products_(config.trade_products),
+    subscribe_products_(config.subscribe_same_products ? config.trade_products : config.subscribe_products),
     broadcast_host_address_(config.broadcast_host_address),
     broadcast_port_(config.broadcast_port),
     order_update_interval_ns_(config.order_update_interval_ms * 1000000),
@@ -51,8 +51,8 @@ OrderHandler::OrderHandler(
     tcp_connecting_(false),
     tcp_connected_(false)
 {
-    for (const auto& code : trade_codes_) {
-        code_states_[code];
+    for (const auto& product : trade_products_) {
+        product_states_[product];
     }
     tcp_client_ = std::make_unique<Connection::TcpClient>(
         *io_context_, logger_, &trader_queue_
@@ -96,8 +96,8 @@ void OrderHandler::set_order_update_timer() {
         if (ec == boost::asio::error::operation_aborted) {
             return;
         } else if (!ec) {
-            for (const auto& trade_code : trade_codes_) {
-                trader_queue_.enqueue(OrderUpdate{.code = trade_code});
+            for (const auto& trade_product : trade_products_) {
+                trader_queue_.enqueue(OrderUpdate{.product = trade_product});
             }
             set_order_update_timer();
         }
@@ -119,9 +119,9 @@ void OrderHandler::start_tcp_client() {
 
 void OrderHandler::on_tcp_status(const TcpStatusUpdate& response) {
     if (!tcp_connected_ && response.connected) {
-        for (const auto& code : subscribe_codes_) {
-            tcp_client_->subscribe(code);
-            LOG_INFO(logger_, "Subscribed code {} on tcp server", code);
+        for (const auto& product : subscribe_products_) {
+            tcp_client_->subscribe(product);
+            LOG_INFO(logger_, "Subscribed product {} on tcp server", product);
         }
     } else if (tcp_connected_ && !response.connected) {
         tcp_client_->connect(broadcast_host_address_, broadcast_port_);
@@ -136,8 +136,8 @@ void OrderHandler::on_tcp_subscribe(const TcpSubscribeUpdate& /*response*/) {
 }
 
 
-void OrderHandler::on_orderbook(const std::string& code, const OrderbookData& data) {
-    auto& state = code_states_[code];
+void OrderHandler::on_orderbook(const std::string& product, const OrderbookData& data) {
+    auto& state = product_states_[product];
     if (data.bid_book.empty() || !data.bid_book[0].price.has_value()) {
         state.l1.bbid_price_in_min_ticks = -1;
         state.l1.bbid_qty_in_lots = 0;
@@ -155,15 +155,15 @@ void OrderHandler::on_orderbook(const std::string& code, const OrderbookData& da
 }
 
 
-void OrderHandler::on_execution(const std::string& code, const ExecutionData& data) {
-    // Route the order to the code that owns it (placed orders are registered in
-    // order_no_to_code_); fall back to the message's code for snapshot orders.
-    std::string target_code = code;
-    auto code_it = order_no_to_code_.find(data.order_no);
-    if (code_it != order_no_to_code_.end()) target_code = code_it->second;
-    if (target_code.empty()) return;
+void OrderHandler::on_execution(const std::string& product, const ExecutionData& data) {
+    // Route the order to the product that owns it (placed orders are registered in
+    // order_no_to_product_); fall back to the message's product for snapshot orders.
+    std::string target_product = product;
+    auto product_it = order_no_to_product_.find(data.order_no);
+    if (product_it != order_no_to_product_.end()) target_product = product_it->second;
+    if (target_product.empty()) return;
 
-    auto& state = code_states_[target_code];
+    auto& state = product_states_[target_product];
 
     auto find_cid = [&](const std::string& order_no) -> int64_t {
         auto it = state.order_no_to_cid.find(order_no);
@@ -172,7 +172,7 @@ void OrderHandler::on_execution(const std::string& code, const ExecutionData& da
     auto erase_order = [&](uint32_t cid) {
         auto on_it = state.cid_to_order_no.find(cid);
         if (on_it != state.cid_to_order_no.end()) {
-            order_no_to_code_.erase(on_it->second);
+            order_no_to_product_.erase(on_it->second);
             state.order_no_to_cid.erase(on_it->second);
             state.cid_to_order_no.erase(on_it);
         }
@@ -212,7 +212,7 @@ void OrderHandler::on_execution(const std::string& code, const ExecutionData& da
                     };
                     state.cid_to_order_no[new_cid] = data.order_no;
                     state.order_no_to_cid[data.order_no] = new_cid;
-                    order_no_to_code_[data.order_no] = target_code;
+                    order_no_to_product_[data.order_no] = target_product;
                 }
             }
         } else if (data.is_executed && data.execute_qty.value_or(0.0) > 0) {
@@ -228,7 +228,7 @@ void OrderHandler::on_execution(const std::string& code, const ExecutionData& da
             }
             LOG_INFO(
                 logger_, "[Fill] {} order_no={} is_bid={} px={} qty={}",
-                target_code, data.order_no, data.is_bid,
+                target_product, data.order_no, data.is_bid,
                 data.execute_price.value_or(NAN), data.execute_qty.value_or(NAN)
             );
         }
@@ -238,25 +238,25 @@ void OrderHandler::on_execution(const std::string& code, const ExecutionData& da
 }
 
 
-void OrderHandler::on_position(const std::string& code, const PositionData& data) {
+void OrderHandler::on_position(const std::string& product, const PositionData& data) {
     if (!data.position_amt.has_value()) return;
-    code_states_[code].position_in_lots = to_qty_in_lots(data.position_amt.value());
-    LOG_INFO(logger_, "[Position] {} position={}", code, data.position_amt.value());
+    product_states_[product].position_in_lots = to_qty_in_lots(data.position_amt.value());
+    LOG_INFO(logger_, "[Position] {} position={}", product, data.position_amt.value());
 }
 
 
 void OrderHandler::process_market_data(const TcpMarketDataResponse& response) {
     switch (response.feed) {
         case TcpMarketDataResponse::Feed::Orderbook:
-            on_orderbook(response.code, std::get<OrderbookData>(response.data));
+            on_orderbook(response.product, std::get<OrderbookData>(response.data));
             break;
         case TcpMarketDataResponse::Feed::Trade:
             break;
         case TcpMarketDataResponse::Feed::Execution:
-            on_execution(response.code, std::get<ExecutionData>(response.data));
+            on_execution(response.product, std::get<ExecutionData>(response.data));
             break;
         case TcpMarketDataResponse::Feed::Position:
-            on_position(response.code, std::get<PositionData>(response.data));
+            on_position(response.product, std::get<PositionData>(response.data));
             break;
         case TcpMarketDataResponse::Error:
             break;
@@ -264,9 +264,9 @@ void OrderHandler::process_market_data(const TcpMarketDataResponse& response) {
 }
 
 
-void OrderHandler::update_orders(const std::string& code) {
-    auto state_it = code_states_.find(code);
-    if (state_it == code_states_.end()) return;
+void OrderHandler::update_orders(const std::string& product) {
+    auto state_it = product_states_.find(product);
+    if (state_it == product_states_.end()) return;
     auto& state = state_it->second;
 
     if (!state.response_waiting.no_waiting_orders()) return;
@@ -285,12 +285,12 @@ void OrderHandler::update_orders(const std::string& code) {
     auto submit_cancel = [&](uint32_t cid) {
         auto on_it = state.cid_to_order_no.find(cid);
         if (on_it == state.cid_to_order_no.end()) return;
-        Omni::OrderGateway::OrderCancelInfo info{.order_no = on_it->second, .code = code};
+        Omni::OrderGateway::OrderCancelInfo info{.order_no = on_it->second, .product = product};
         Omni::OrderGateway::OrderResponse resp;
         order_gateway_->cancel_order(info, resp);
         if (resp.success) {
             // synchronous ack: drop the order locally
-            order_no_to_code_.erase(on_it->second);
+            order_no_to_product_.erase(on_it->second);
             state.order_no_to_cid.erase(on_it->second);
             state.outstanding_orders.erase(cid);
             state.cid_to_order_no.erase(on_it);
@@ -306,7 +306,7 @@ void OrderHandler::update_orders(const std::string& code) {
             .is_bid = is_bid,
             .price = to_double_price(price_in_min_ticks),
             .qty = to_double_qty(qty_in_lots),
-            .code = code
+            .product = product
         };
         Omni::OrderGateway::OrderResponse resp;
         order_gateway_->place_order(info, resp);
@@ -319,10 +319,10 @@ void OrderHandler::update_orders(const std::string& code) {
             };
             state.cid_to_order_no[cid] = resp.order_no;
             state.order_no_to_cid[resp.order_no] = cid;
-            order_no_to_code_[resp.order_no] = code;
+            order_no_to_product_[resp.order_no] = product;
             LOG_INFO(
                 logger_, "[Order Place] {} order_no={} is_bid={} px={} qty={}",
-                code, resp.order_no, is_bid, info.price, info.qty
+                product, resp.order_no, is_bid, info.price, info.qty
             );
         }
     };
@@ -343,7 +343,7 @@ void OrderHandler::run() {
         [&](const TcpStatusUpdate& response) { on_tcp_status(response); },
         [&](const TcpSubscribeUpdate& response) { on_tcp_subscribe(response); },
         [&](const TcpMarketDataResponse& response) { process_market_data(response); },
-        [&](const OrderUpdate& update) { update_orders(update.code); }
+        [&](const OrderUpdate& update) { update_orders(update.product); }
     }, task);
 }
 

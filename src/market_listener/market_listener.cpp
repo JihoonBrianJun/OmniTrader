@@ -74,45 +74,45 @@ void MarketListener::start_tcp_server() {
 
 
 Logger::CsvLogger<OrderbookCsvSchema>* MarketListener::get_orderbook_logger(
-    const std::string& code
+    const std::string& product
 ) {
-    auto it = orderbook_loggers_.find(code);
+    auto it = orderbook_loggers_.find(product);
     if (it != orderbook_loggers_.end()) return it->second.get();
 
     auto curr_date = get_curr_date(config_.timezone_minute_offset);
     auto logger = std::make_shared<Logger::CsvLogger<OrderbookCsvSchema>>(
-        fmt::format("{}_{}_orderbook_logger", config_.exchange, code),
+        fmt::format("{}_{}_orderbook_logger", config_.exchange, product),
         fmt::format(
             "{}/{}/{}/{}.log",
-            config_.orderbook_save_path, config_.exchange, code, curr_date
+            config_.orderbook_save_path, config_.exchange, product, curr_date
         )
     );
-    orderbook_loggers_[code] = logger;
+    orderbook_loggers_[product] = logger;
     return logger.get();
 }
 
 
 Logger::CsvLogger<TradeCsvSchema>* MarketListener::get_trade_logger(
-    const std::string& code
+    const std::string& product
 ) {
-    auto it = trade_loggers_.find(code);
+    auto it = trade_loggers_.find(product);
     if (it != trade_loggers_.end()) return it->second.get();
 
     auto curr_date = get_curr_date(config_.timezone_minute_offset);
     auto logger = std::make_shared<Logger::CsvLogger<TradeCsvSchema>>(
-        fmt::format("{}_{}_trade_logger", config_.exchange, code),
+        fmt::format("{}_{}_trade_logger", config_.exchange, product),
         fmt::format(
             "{}/{}/{}/{}.log",
-            config_.trade_save_path, config_.exchange, code, curr_date
+            config_.trade_save_path, config_.exchange, product, curr_date
         )
     );
-    trade_loggers_[code] = logger;
+    trade_loggers_[product] = logger;
     return logger.get();
 }
 
 
 void MarketListener::log_orderbook_data(const OrderbookMsg& msg) {
-    auto* csv = get_orderbook_logger(msg.code);
+    auto* csv = get_orderbook_logger(msg.product);
     auto local_tstamp = get_curr_tstamp_ns();
     for (const auto& bid_level : msg.orderbook_data.bid_book) {
         csv->write_log(local_tstamp, true, bid_level.price.value_or(NAN), bid_level.qty.value_or(NAN));
@@ -124,7 +124,7 @@ void MarketListener::log_orderbook_data(const OrderbookMsg& msg) {
 
 
 void MarketListener::log_trade_data(const TradeMsg& msg) {
-    auto* csv = get_trade_logger(msg.code);
+    auto* csv = get_trade_logger(msg.product);
     auto local_tstamp = get_curr_tstamp_ns();
     csv->write_log(
         local_tstamp,

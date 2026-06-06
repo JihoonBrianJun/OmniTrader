@@ -53,7 +53,7 @@ class MarketListener {
                 if (ec) {
                     LOG_WARNING(logger_, "Failed write_json while broadcasting");
                 } else {
-                    tcp_server_->broadcast_to_subscribers(msg.code, json_buffer);
+                    tcp_server_->broadcast_to_subscribers(msg.product, json_buffer);
                     LOG_INFO(logger_, "{}", json_buffer);
                 }
             } catch (const std::exception& e) {
@@ -61,8 +61,8 @@ class MarketListener {
             }
         }
 
-        Logger::CsvLogger<OrderbookCsvSchema>* get_orderbook_logger(const std::string& code);
-        Logger::CsvLogger<TradeCsvSchema>* get_trade_logger(const std::string& code);
+        Logger::CsvLogger<OrderbookCsvSchema>* get_orderbook_logger(const std::string& product);
+        Logger::CsvLogger<TradeCsvSchema>* get_trade_logger(const std::string& product);
         void log_orderbook_data(const OrderbookMsg& msg);
         void log_trade_data(const TradeMsg& msg);
 };

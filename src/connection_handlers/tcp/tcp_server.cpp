@@ -122,9 +122,9 @@ void TcpSession::handle_message(const std::string& message) {
         }
 
         if (subscribe_request.subscribe) {
-            subscribe_to_code(subscribe_request.code);
+            subscribe_to_product(subscribe_request.product);
         } else {
-            unsubscribe_from_code(subscribe_request.code);
+            unsubscribe_from_product(subscribe_request.product);
         }
     } catch (const std::exception& e) {
         LOG_WARNING(logger_, "Error parsing client message: {}", e.what());
@@ -132,34 +132,34 @@ void TcpSession::handle_message(const std::string& message) {
 }
 
 
-void TcpSession::subscribe_to_code(const std::string& code) {
-    server_->notify_subscribe(shared_from_this(), code);
+void TcpSession::subscribe_to_product(const std::string& product) {
+    server_->notify_subscribe(shared_from_this(), product);
 
     auto subscribe_response = SubscribeResponseMsg{
-        .subscribe = true, .success = true, .code = code
+        .subscribe = true, .success = true, .product = product
     };
 
     std::string json_buffer;
     auto ec = glz::write_json(subscribe_response, json_buffer);
     if (ec) {
-        LOG_WARNING(logger_, "Failed write_json for the subscribe response of code {}", code);
+        LOG_WARNING(logger_, "Failed write_json for the subscribe response of product {}", product);
     } else {
         send_message(json_buffer);
     }
 }
 
 
-void TcpSession::unsubscribe_from_code(const std::string& code) {
-    server_->notify_unsubscribe(shared_from_this(), code);
+void TcpSession::unsubscribe_from_product(const std::string& product) {
+    server_->notify_unsubscribe(shared_from_this(), product);
 
     auto unsubscribe_response = SubscribeResponseMsg{
-        .subscribe = false, .success = true, .code = code
+        .subscribe = false, .success = true, .product = product
     };
 
     std::string json_buffer;
     auto ec = glz::write_json(unsubscribe_response, json_buffer);
     if (ec) {
-        LOG_WARNING(logger_, "Failed write_json for the unsubscribe response of code {}", code);
+        LOG_WARNING(logger_, "Failed write_json for the unsubscribe response of product {}", product);
     } else {
         send_message(json_buffer);
     }
@@ -207,11 +207,11 @@ void TcpServer::stop() {
     boost::system::error_code ec;
     acceptor_.close(ec);
 
-    for (auto& [session, codes] : session_to_codes_) {
+    for (auto& [session, products] : session_to_products_) {
         session->close();
     }
-    session_to_codes_.clear();
-    code_to_sessions_.clear();
+    session_to_products_.clear();
+    product_to_sessions_.clear();
 
     if (task_thread_.joinable()) {
         task_thread_.join();
@@ -220,10 +220,10 @@ void TcpServer::stop() {
 
 
 void TcpServer::broadcast_to_subscribers(
-    const std::string& code, const std::string& json_data
+    const std::string& product, const std::string& json_data
 ) {
     if (!running_.load()) return;
-    task_queue_.enqueue(BroadcastMessage{code, json_data});
+    task_queue_.enqueue(BroadcastMessage{product, json_data});
 }
 
 
@@ -241,16 +241,16 @@ void TcpServer::remove_session(std::shared_ptr<TcpSession> session) {
 }
 
 
-void TcpServer::notify_subscribe(std::shared_ptr<TcpSession> session, const std::string& code) {
+void TcpServer::notify_subscribe(std::shared_ptr<TcpSession> session, const std::string& product) {
     task_queue_.enqueue(SubscriptionCommand{
-        SubscriptionCommand::Type::SUBSCRIBE_CODE, session, code
+        SubscriptionCommand::Type::SUBSCRIBE_PRODUCT, session, product
     });
 }
 
 
-void TcpServer::notify_unsubscribe(std::shared_ptr<TcpSession> session, const std::string& code) {
+void TcpServer::notify_unsubscribe(std::shared_ptr<TcpSession> session, const std::string& product) {
     task_queue_.enqueue(SubscriptionCommand{
-        SubscriptionCommand::Type::UNSUBSCRIBE_CODE, session, code
+        SubscriptionCommand::Type::UNSUBSCRIBE_PRODUCT, session, product
     });
 }
 
@@ -283,22 +283,22 @@ void TcpServer::broadcast_worker() {
             [&](const SessionCommand& cmd) {
                 switch (cmd.type) {
                     case SessionCommand::Type::ADD_SESSION: {
-                        session_to_codes_[cmd.session] = std::unordered_set<std::string>();
+                        session_to_products_[cmd.session] = std::unordered_set<std::string>();
                         break;
                     }
                     case SessionCommand::Type::REMOVE_SESSION: {
-                        auto it = session_to_codes_.find(cmd.session);
-                        if (it != session_to_codes_.end()) {
-                            for (const auto& code : it->second) {
-                                auto code_it = code_to_sessions_.find(code);
-                                if (code_it != code_to_sessions_.end()) {
-                                    code_it->second.erase(cmd.session);
-                                    if (code_it->second.empty()) {
-                                        code_to_sessions_.erase(code_it);
+                        auto it = session_to_products_.find(cmd.session);
+                        if (it != session_to_products_.end()) {
+                            for (const auto& product : it->second) {
+                                auto product_it = product_to_sessions_.find(product);
+                                if (product_it != product_to_sessions_.end()) {
+                                    product_it->second.erase(cmd.session);
+                                    if (product_it->second.empty()) {
+                                        product_to_sessions_.erase(product_it);
                                     }
                                 }
                             }
-                            session_to_codes_.erase(it);
+                            session_to_products_.erase(it);
                         }
                         break;
                     }
@@ -306,22 +306,22 @@ void TcpServer::broadcast_worker() {
             },
             [&](const SubscriptionCommand& cmd) {
                 switch (cmd.type) {
-                    case SubscriptionCommand::Type::SUBSCRIBE_CODE: {
-                        session_to_codes_[cmd.session].insert(cmd.code);
-                        code_to_sessions_[cmd.code].insert(cmd.session);
+                    case SubscriptionCommand::Type::SUBSCRIBE_PRODUCT: {
+                        session_to_products_[cmd.session].insert(cmd.product);
+                        product_to_sessions_[cmd.product].insert(cmd.session);
                         break;
                     }
-                    case SubscriptionCommand::Type::UNSUBSCRIBE_CODE: {
-                        auto session_it = session_to_codes_.find(cmd.session);
-                        if (session_it != session_to_codes_.end()) {
-                            session_it->second.erase(cmd.code);
+                    case SubscriptionCommand::Type::UNSUBSCRIBE_PRODUCT: {
+                        auto session_it = session_to_products_.find(cmd.session);
+                        if (session_it != session_to_products_.end()) {
+                            session_it->second.erase(cmd.product);
                         }
 
-                        auto code_it = code_to_sessions_.find(cmd.code);
-                        if (code_it != code_to_sessions_.end()) {
-                            code_it->second.erase(cmd.session);
-                            if (code_it->second.empty()) {
-                                code_to_sessions_.erase(code_it);
+                        auto product_it = product_to_sessions_.find(cmd.product);
+                        if (product_it != product_to_sessions_.end()) {
+                            product_it->second.erase(cmd.session);
+                            if (product_it->second.empty()) {
+                                product_to_sessions_.erase(product_it);
                             }
                         }
                         break;
@@ -329,8 +329,8 @@ void TcpServer::broadcast_worker() {
                 }
             },
             [&](const BroadcastMessage& msg) {
-                auto it = code_to_sessions_.find(msg.code);
-                if (it != code_to_sessions_.end()) {
+                auto it = product_to_sessions_.find(msg.product);
+                if (it != product_to_sessions_.end()) {
                     for (auto& session : it->second) {
                         session->send_message(msg.json_data);
                     }

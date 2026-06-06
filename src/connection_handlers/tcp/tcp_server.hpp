@@ -33,8 +33,8 @@ class TcpSession : public std::enable_shared_from_this<TcpSession> {
         void do_read();
         void do_write();
         void handle_message(const std::string& message);
-        void subscribe_to_code(const std::string& code);
-        void unsubscribe_from_code(const std::string& code);
+        void subscribe_to_product(const std::string& product);
+        void unsubscribe_from_product(const std::string& product);
 
         boost::asio::ip::tcp::socket socket_;
         quill::Logger* logger_;
@@ -57,15 +57,15 @@ struct SessionCommand {
 
 struct SubscriptionCommand {
     enum Type {
-        SUBSCRIBE_CODE,
-        UNSUBSCRIBE_CODE
+        SUBSCRIBE_PRODUCT,
+        UNSUBSCRIBE_PRODUCT
     } type;
     std::shared_ptr<TcpSession> session;
-    std::string code;
+    std::string product;
 };
 
 struct BroadcastMessage {
-    std::string code;
+    std::string product;
     std::string json_data;
 };
 
@@ -86,13 +86,13 @@ class TcpServer {
         void start();
         void stop();
         void broadcast_to_subscribers(
-            const std::string& code, const std::string& json_data
+            const std::string& product, const std::string& json_data
         );
 
         void add_session(std::shared_ptr<TcpSession> session);
         void remove_session(std::shared_ptr<TcpSession> session);
-        void notify_subscribe(std::shared_ptr<TcpSession> session, const std::string& code);
-        void notify_unsubscribe(std::shared_ptr<TcpSession> session, const std::string& code);
+        void notify_subscribe(std::shared_ptr<TcpSession> session, const std::string& product);
+        void notify_unsubscribe(std::shared_ptr<TcpSession> session, const std::string& product);
 
     private:
         void do_accept();
@@ -103,8 +103,8 @@ class TcpServer {
 
         quill::Logger* logger_;
 
-        std::unordered_map<std::shared_ptr<TcpSession>, std::unordered_set<std::string>> session_to_codes_;
-        std::unordered_map<std::string, std::unordered_set<std::shared_ptr<TcpSession>>> code_to_sessions_;
+        std::unordered_map<std::shared_ptr<TcpSession>, std::unordered_set<std::string>> session_to_products_;
+        std::unordered_map<std::string, std::unordered_set<std::shared_ptr<TcpSession>>> product_to_sessions_;
 
         moodycamel::BlockingConcurrentQueue<ServerTask> task_queue_;
         std::thread task_thread_;

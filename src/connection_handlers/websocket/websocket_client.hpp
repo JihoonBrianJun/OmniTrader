@@ -140,7 +140,7 @@ class BaseWebsocketClient : public websocketpp::client<Config> {
                 auto conn = this->get_con_from_hdl(hdl);
                 LOG_WARNING(
                     logger_,
-                    "Connection closed with code: {} ({})",
+                    "Connection closed with product: {} ({})",
                     conn->get_remote_close_code(),
                     conn->get_remote_close_reason()
                 );

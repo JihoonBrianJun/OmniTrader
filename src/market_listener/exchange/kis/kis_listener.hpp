@@ -10,7 +10,7 @@
 #include <boost/asio/steady_timer.hpp>
 
 #include "market_listener/exchange/exchange_listener.hpp"
-#include "market_listener/exchange/kis/code_manager_base.hpp"
+#include "market_listener/exchange/kis/product_manager_base.hpp"
 #include "market_listener/exchange/kis/kis_ws_client.hpp"
 #include "market_listener/exchange/kis/kis_listener_dtypes.hpp"
 
@@ -37,7 +37,7 @@ class KisListener : public IExchangeListener {
         moodycamel::BlockingConcurrentQueue<ListenerEvent>* event_queue_;
 
         std::string ws_domain_, hts_id_;
-        std::shared_ptr<Omni::KIS::CodeManager::ICodeManager> code_manager_;
+        std::shared_ptr<Omni::KIS::ProductManager::IProductManager> product_manager_;
         std::vector<std::string> subscription_messages_;
 
         moodycamel::BlockingConcurrentQueue<WsResponse> ws_response_queue_;
@@ -51,9 +51,9 @@ class KisListener : public IExchangeListener {
         std::thread worker_thread_;
         std::atomic<bool> running_;
 
-        void create_code_manager();
+        void create_product_manager();
         void create_ws_client();
-        std::string write_ws_request_msg(const Omni::KIS::CodeManager::SubscriptionInput& input);
+        std::string write_ws_request_msg(const Omni::KIS::ProductManager::SubscriptionInput& input);
 
         void worker_loop();
         void on_ws_status(const WsStatusUpdate& update);

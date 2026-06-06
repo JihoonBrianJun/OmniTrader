@@ -14,12 +14,12 @@ RestOrderGateway::RestOrderGateway(
     quill::Logger* logger,
     const std::string& rest_domain,
     std::shared_ptr<Omni::Config::ISigner> signer,
-    std::shared_ptr<SymbolManager> symbol_manager
+    std::shared_ptr<ProductManager> product_manager
 )
 :   logger_(logger),
     rest_domain_(rest_domain),
     signer_(std::move(signer)),
-    symbol_manager_(std::move(symbol_manager))
+    product_manager_(std::move(product_manager))
 {
 }
 
@@ -65,12 +65,12 @@ void RestOrderGateway::send_order(
 void RestOrderGateway::place_order(const OG::OrderPlaceInfo& info, OG::OrderResponse& response) {
     std::string params = fmt::format(
         "symbol={}&side={}&type={}&quantity={}",
-        info.code, info.is_bid ? "BUY" : "SELL", info.is_limit ? "LIMIT" : "MARKET",
-        symbol_manager_->format_qty(info.code, info.qty)
+        info.product, info.is_bid ? "BUY" : "SELL", info.is_limit ? "LIMIT" : "MARKET",
+        product_manager_->format_qty(info.product, info.qty)
     );
     if (info.is_limit) {
         params += fmt::format(
-            "&timeInForce=GTC&price={}", symbol_manager_->format_price(info.code, info.price)
+            "&timeInForce=GTC&price={}", product_manager_->format_price(info.product, info.price)
         );
     }
     send_order("POST", params, response);
@@ -81,16 +81,16 @@ void RestOrderGateway::amend_order(const OG::OrderAmendInfo& info, OG::OrderResp
     // Binance amend (PUT /fapi/v1/order) requires side, quantity and price.
     std::string params = fmt::format(
         "symbol={}&orderId={}&quantity={}&price={}",
-        info.code, info.order_no,
-        symbol_manager_->format_qty(info.code, info.qty),
-        symbol_manager_->format_price(info.code, info.price)
+        info.product, info.order_no,
+        product_manager_->format_qty(info.product, info.qty),
+        product_manager_->format_price(info.product, info.price)
     );
     send_order("PUT", params, response);
 }
 
 
 void RestOrderGateway::cancel_order(const OG::OrderCancelInfo& info, OG::OrderResponse& response) {
-    std::string params = fmt::format("symbol={}&orderId={}", info.code, info.order_no);
+    std::string params = fmt::format("symbol={}&orderId={}", info.product, info.order_no);
     send_order("DELETE", params, response);
 }
 

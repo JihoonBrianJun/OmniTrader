@@ -46,15 +46,15 @@ std::string SnapshotFetcher::signed_get(const std::string& path, const std::stri
 }
 
 
-DepthSnapshot SnapshotFetcher::fetch_depth(const std::string& symbol, int limit) {
+DepthSnapshot SnapshotFetcher::fetch_depth(const std::string& product, int limit) {
     DepthSnapshot snapshot;
-    auto url = fmt::format("{}/fapi/v1/depth?symbol={}&limit={}", rest_domain_, symbol, limit);
+    auto url = fmt::format("{}/fapi/v1/depth?symbol={}&limit={}", rest_domain_, product, limit);
     auto client = std::make_shared<Omni::Connection::HttpClient>(logger_);
     auto response = client->get(url);
     if (!response.success || response.status_code != 200) {
         LOG_WARNING(
             logger_, "Depth snapshot for {} failed: {} {} {}",
-            symbol, response.error_msg, response.status_code, response.body
+            product, response.error_msg, response.status_code, response.body
         );
         return snapshot;
     }
@@ -74,7 +74,7 @@ DepthSnapshot SnapshotFetcher::fetch_depth(const std::string& symbol, int limit)
         }
         snapshot.ok = true;
     } catch (const std::exception& e) {
-        LOG_WARNING(logger_, "Failed to parse depth snapshot for {}: {}", symbol, e.what());
+        LOG_WARNING(logger_, "Failed to parse depth snapshot for {}: {}", product, e.what());
     }
     return snapshot;
 }
@@ -91,7 +91,7 @@ std::vector<Omni::PositionMsg> SnapshotFetcher::fetch_positions() {
             double amt = std::stod(p.at("positionAmt").get<std::string>());
             if (amt == 0.0) continue;
             Omni::PositionMsg msg;
-            msg.code = p.at("symbol").get<std::string>();
+            msg.product = p.at("symbol").get<std::string>();
             msg.position_data.position_amt = amt;
             msg.position_data.entry_price = std::stod(p.at("entryPrice").get<std::string>());
             msg.position_data.unrealized_pnl = std::stod(p.at("unRealizedProfit").get<std::string>());
@@ -113,7 +113,7 @@ std::vector<Omni::ExecutionMsg> SnapshotFetcher::fetch_open_orders() {
         auto j = nlohmann::json::parse(body);
         for (const auto& o : j) {
             Omni::ExecutionMsg msg;
-            msg.code = o.at("symbol").get<std::string>();
+            msg.product = o.at("symbol").get<std::string>();
             auto& d = msg.execution_data;
             d.order_no = std::to_string(o.at("orderId").get<long>());
             d.is_accept_data = true;

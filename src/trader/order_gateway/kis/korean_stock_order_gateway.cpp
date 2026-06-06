@@ -15,8 +15,8 @@ KoreanStockOrderGateway::KoreanStockOrderGateway(quill::Logger* logger, const st
 }
 
 
-std::string KoreanStockOrderGateway::convert_code_for_order(const std::string& code) {
-    return code;
+std::string KoreanStockOrderGateway::convert_product_for_order(const std::string& product) {
+    return product;
 }
 
 
@@ -82,7 +82,7 @@ void KoreanStockOrderGateway::write_order_place_params(
     auto params = OrderPlaceParams{
         .CANO = account_info_.front,
         .ACNT_PRDT_CD = account_info_.rear,
-        .PDNO = convert_code_for_order(order_place_info.code),
+        .PDNO = convert_product_for_order(order_place_info.product),
         .ORD_DVSN = order_place_info.is_limit ? "00" : "01",
         .ORD_QTY = double_to_string(order_place_info.qty),
         .ORD_UNPR = double_to_string(order_place_info.price)

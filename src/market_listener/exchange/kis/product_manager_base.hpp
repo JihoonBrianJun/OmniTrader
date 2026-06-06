@@ -14,7 +14,7 @@
 #include "common/market_msg_types.hpp"
 
 
-namespace Omni::KIS::CodeManager {
+namespace Omni::KIS::ProductManager {
 
 struct SubscriptionInput {
     std::string tr_id;
@@ -29,25 +29,25 @@ enum TrIdType {
 };
 
 
-class ICodeManager {
+class IProductManager {
     public:
-        virtual ~ICodeManager() = default;
+        virtual ~IProductManager() = default;
 
-        virtual std::string get_code_manager_name() = 0;
+        virtual std::string get_product_manager_name() = 0;
 
-        virtual SubscriptionInput get_orderbook_subscription_input(const std::string& code) = 0;
-        virtual SubscriptionInput get_trade_subscription_input(const std::string& code) = 0;
-        virtual SubscriptionInput get_execution_subscription_input(const std::string& code) = 0;
+        virtual SubscriptionInput get_orderbook_subscription_input(const std::string& product) = 0;
+        virtual SubscriptionInput get_trade_subscription_input(const std::string& product) = 0;
+        virtual SubscriptionInput get_execution_subscription_input(const std::string& product) = 0;
 
-        virtual std::string get_full_code(const std::string& code) = 0;
+        virtual std::string get_full_product(const std::string& product) = 0;
         virtual TrIdType get_tr_id_type(const std::string& tr_id) = 0;
 
         virtual size_t parse_orderbook_data(
-            const std::string& code, size_t offset, const std::vector<std::string>& data,
+            const std::string& product, size_t offset, const std::vector<std::string>& data,
             Omni::OrderbookMsg& parsed_msg
         ) = 0;
         virtual size_t parse_trade_data(
-            const std::string& code, size_t offset, const std::vector<std::string>& data,
+            const std::string& product, size_t offset, const std::vector<std::string>& data,
             Omni::TradeMsg& parsed_msg
         ) = 0;
         virtual size_t parse_execution_data(
@@ -58,32 +58,32 @@ class ICodeManager {
 
 
 template<typename ProductTypeEnum>
-class BaseCodeManger : public ICodeManager {
+class BaseProductManger : public IProductManager {
     public:
-        struct CodeInfo {
-            std::string short_code;
+        struct ProductInfo {
+            std::string short_product;
             ProductTypeEnum product_type;
         };
 
-        BaseCodeManger(
-            const std::vector<std::string>& codes,
-            const std::string& codes_db_path,
+        BaseProductManger(
+            const std::vector<std::string>& products,
+            const std::string& products_db_path,
             const std::string& hts_id,
             bool is_night,
             quill::Logger* logger
         )
-        :   codes_(codes),
-            codes_db_path_(codes_db_path),
+        :   products_(products),
+            products_db_path_(products_db_path),
             hts_id_(hts_id),
             is_night_(is_night),
             logger_(logger)
         {
         }
 
-        virtual ~BaseCodeManger() = default;
+        virtual ~BaseProductManger() = default;
 
-        std::string get_code_manager_name() override {
-            return code_manager_name_;
+        std::string get_product_manager_name() override {
+            return product_manager_name_;
         }
 
         TrIdType get_tr_id_type(const std::string& tr_id) override {
@@ -93,19 +93,19 @@ class BaseCodeManger : public ICodeManager {
         }
 
     protected:
-        std::string code_manager_name_;
-        const std::vector<std::string> codes_;
-        const std::string codes_db_path_, hts_id_;
+        std::string product_manager_name_;
+        const std::vector<std::string> products_;
+        const std::string products_db_path_, hts_id_;
         bool is_night_;
         quill::Logger* logger_;
 
         std::map<std::string, TrIdType> tr_id_types_;
 
-        std::set<std::string> read_codes_file(
-            const std::string& file_name, const std::string& codes_col_name
+        std::set<std::string> read_products_file(
+            const std::string& file_name, const std::string& products_col_name
         ) {
             std::set<std::string> result;
-            std::ifstream file(fmt::format("{}/{}", codes_db_path_, file_name));
+            std::ifstream file(fmt::format("{}/{}", products_db_path_, file_name));
             if (!file.is_open()) {
                 return result;
             }
@@ -118,7 +118,7 @@ class BaseCodeManger : public ICodeManager {
                 std::string cell;
                 int col_index = 0;
                 while (std::getline(ss, cell, ',')) {
-                    if (cell == codes_col_name) {
+                    if (cell == products_col_name) {
                         target_column_index = col_index;
                         break;
                     }
@@ -145,10 +145,10 @@ class BaseCodeManger : public ICodeManager {
             return result;
         }
 
-        virtual void load_all_codes() = 0;
+        virtual void load_all_products() = 0;
 
-        virtual std::string get_short_code(const std::string& full_code) = 0;
-        virtual ProductTypeEnum get_product_type(const std::string& code, bool verbose = true) = 0;
+        virtual std::string get_short_product(const std::string& full_product) = 0;
+        virtual ProductTypeEnum get_product_type(const std::string& product, bool verbose = true) = 0;
 
         template<typename T, std::size_t... Indices>
         T vector_to_struct_impl(
@@ -167,4 +167,4 @@ class BaseCodeManger : public ICodeManager {
         }
 };
 
-} // namespace Omni::KIS::CodeManager
+} // namespace Omni::KIS::ProductManager
