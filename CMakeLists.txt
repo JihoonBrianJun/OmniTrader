@@ -13,6 +13,7 @@ find_package(CURL REQUIRED)
 find_package(websocketpp REQUIRED)
 find_package(concurrentqueue REQUIRED)
 find_package(OpenSSL REQUIRED)
+find_package(argparse REQUIRED)
 
 # All shared/library sources (everything under src/ except the two entrypoints).
 file(GLOB_RECURSE OMNI_CORE_SOURCES CONFIGURE_DEPENDS src/*.cpp)
@@ -35,6 +36,7 @@ target_link_libraries(omni_core
         concurrentqueue::concurrentqueue
         OpenSSL::SSL
         OpenSSL::Crypto
+        argparse::argparse
 )
 
 add_executable(listener src/listener_main.cpp)

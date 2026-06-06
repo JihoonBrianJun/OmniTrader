@@ -7,6 +7,11 @@ std::string config_dir(const std::string& exchange) {
 }
 
 
+std::string domain_file(const std::string& exchange) {
+    return fmt::format("./domain/{}.json", exchange);
+}
+
+
 std::pair<bool, AuthKeys> get_auth_keys(const std::string& exchange) {
     return read_config_file<AuthKeys>(
         fmt::format("{}/auth_keys.json", config_dir(exchange))
@@ -17,9 +22,7 @@ std::pair<bool, AuthKeys> get_auth_keys(const std::string& exchange) {
 std::pair<bool, std::map<std::string, std::string>> get_domains(
     const std::string& exchange
 ) {
-    return read_config_file<std::map<std::string, std::string>>(
-        fmt::format("{}/domain_config.json", config_dir(exchange))
-    );
+    return read_config_file<std::map<std::string, std::string>>(domain_file(exchange));
 }
 
 

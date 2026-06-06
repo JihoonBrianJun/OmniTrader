@@ -1,0 +1,6 @@
+{
+    "rest_real": "https://openapi.koreainvestment.com:9443",
+    "rest_test": "https://openapivts.koreainvestment.com:29443",
+    "ws_real": "ws://ops.koreainvestment.com:21000",
+    "ws_test": "ws://ops.koreainvestment.com:31000"
+}

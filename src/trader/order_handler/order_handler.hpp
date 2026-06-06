@@ -1,0 +1,82 @@
+#pragma once
+
+#include <memory>
+#include <map>
+#include <string>
+#include <thread>
+
+#include <quill/Logger.h>
+#include <moodycamel/blockingconcurrentqueue.h>
+#include <boost/asio.hpp>
+#include <boost/asio/steady_timer.hpp>
+
+#include "trader/trader_dtypes.hpp"
+#include "trader/pricer/pricer.hpp"
+#include "trader/strategy/base_strategy.hpp"
+#include "trader/order_gateway/order_gateway.hpp"
+#include "trader/order_handler/order_handler_dtypes.hpp"
+#include "connection_handlers/tcp/tcp_client.hpp"
+
+
+namespace Omni::Trader {
+
+// Live equivalent of orderbook-backtest BaseOrderHandler. Drives the same
+// pricer -> strategy.make_decision -> order submission flow, but sourced from the
+// listener's TCP market/user feed and routed through an IOrderGateway (the real
+// exchange) instead of a simulated matching engine.
+class OrderHandler {
+public:
+    OrderHandler(
+        const MarketConfig& market_config,
+        std::shared_ptr<BaseStrategy> strategy,
+        const TraderConfig& config,
+        quill::Logger* logger
+    );
+    ~OrderHandler();
+
+    void run();
+
+private:
+    quill::Logger* logger_;
+    MarketConfig market_config_;
+    double min_tick_size_, lot_size_;
+    std::shared_ptr<BaseStrategy> strategy_;
+
+    const std::vector<std::string> trade_codes_, subscribe_codes_;
+    const std::string broadcast_host_address_;
+    unsigned short broadcast_port_;
+    long order_update_interval_ns_;
+
+    std::unique_ptr<Omni::OrderGateway::IOrderGateway> order_gateway_;
+    Pricer pricer_;
+
+    std::map<std::string, CodeState> code_states_;
+    std::map<std::string, std::string> order_no_to_code_;
+
+    moodycamel::BlockingConcurrentQueue<Task> trader_queue_;
+    std::unique_ptr<boost::asio::io_context> io_context_;
+    std::thread io_thread_;
+    std::shared_ptr<boost::asio::steady_timer> order_update_timer_;
+
+    std::unique_ptr<Connection::TcpClient> tcp_client_;
+    bool tcp_connecting_, tcp_connected_;
+
+    void set_order_update_timer();
+    void start_tcp_client();
+
+    void on_tcp_status(const TcpStatusUpdate& response);
+    void on_tcp_subscribe(const TcpSubscribeUpdate& response);
+    void process_market_data(const TcpMarketDataResponse& response);
+
+    int64_t to_price_in_min_ticks(double price);
+    int32_t to_qty_in_lots(double qty);
+    double to_double_price(int64_t price_in_min_ticks);
+    double to_double_qty(int32_t qty_in_lots);
+
+    void on_orderbook(const std::string& code, const OrderbookData& data);
+    void on_execution(const std::string& code, const ExecutionData& data);
+    void on_position(const std::string& code, const PositionData& data);
+    void update_orders(const std::string& code);
+};
+
+} // namespace Omni::Trader

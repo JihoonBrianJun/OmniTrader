@@ -25,12 +25,21 @@ exchange feeds → │ IExchangeListener adapter         │ → normalized even
                  │    KIS: single market WS)         │   TcpServer ──┐
                  └───────────────────────────────────┘               │ TCP
                  ┌──────────── trader ──────────────┐                 │
-                 │ TcpClient ← normalized events ────┼─────────────────┘
-                 │ Strategy → IOrderGateway          │ → exchange orders
+                 │ OrderHandler ← TcpClient feed ─────┼─────────────────┘
+                 │   Pricer → Strategy.make_decision  │
+                 │   → IOrderGateway                  │ → exchange orders
                  │   (Binance: WS-API + REST fallback;
                  │    KIS: REST)                     │
                  └───────────────────────────────────┘
 ```
+
+The trader is structured as **pricer → strategy → order_handler** (mirroring the
+`orderbook-backtest` project): [pricer/](src/trader/pricer/) computes `PriceInfo`
+from the live L1, [strategy/](src/trader/strategy/) (`BaseStrategy`/`GeuantStrategy`
+with `make_decision`) decides orders in tick/lot units, and
+[order_handler/](src/trader/order_handler/) maps those to the `IOrderGateway` and
+tracks per-code position/outstanding state. CLI parsing uses the `argparse`
+library.
 
 Key generic seams: `Omni::Listener::IExchangeListener`
 ([exchange_listener.hpp](src/market_listener/exchange/exchange_listener.hpp)) and
@@ -49,13 +58,11 @@ libcurl, websocketpp, concurrentqueue, openssl) are resolved by conan.
 
 ## Configuration
 
-Per-exchange config lives in `config/<exchange>/`:
-
-- `domain_config.json` — flat `{name: url}` map of endpoints (committed).
-- `auth_keys.json` — `{"key","secret"}` API credentials (gitignored; see the
-  `*.example.json` templates).
-- KIS additionally uses `account_info.json` and runtime-written
-  `rest_access.json` / `websocket_access.json`.
+- `domain/<exchange>.json` — flat `{name: url}` map of endpoints (committed).
+- `config/<exchange>/auth_keys.json` — `{"key","secret"}` API credentials
+  (gitignored; see the `*.example.json` templates).
+- KIS additionally uses `config/kis/account_info.json` and runtime-written
+  `config/kis/rest_access.json` / `websocket_access.json`.
 
 ## Run (Binance USDⓈ-M, testnet)
 

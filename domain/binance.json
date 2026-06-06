@@ -1,0 +1,8 @@
+{
+    "rest_real": "https://fapi.binance.com",
+    "rest_test": "https://testnet.binancefuture.com",
+    "ws_stream_real": "wss://fstream.binance.com",
+    "ws_stream_test": "wss://stream.binancefuture.com",
+    "ws_api_real": "wss://ws-fapi.binance.com/ws-fapi/v1",
+    "ws_api_test": "wss://testnet.binancefuture.com/ws-fapi/v1"
+}

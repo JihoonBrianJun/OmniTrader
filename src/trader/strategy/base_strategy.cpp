@@ -1,0 +1,84 @@
+#include <fstream>
+#include "base_strategy.hpp"
+
+namespace Omni::Trader {
+
+std::vector<double> interpolate_params(size_t param_num, double param_lb, double param_ub) {
+    std::vector<double> params_list;
+    auto param_interval = (param_ub - param_lb) / static_cast<double>(param_num - 1);
+
+    for (size_t param_idx = 0; param_idx < param_num; ++param_idx) {
+        params_list.emplace_back(param_lb + param_idx * param_interval);
+    }
+
+    return params_list;
+}
+
+
+BaseStrategy::BaseStrategy(const MarketConfig& market_config)
+:   min_tick_size_(market_config.min_tick_size),
+    lot_size_(market_config.lot_size),
+    tick_func_(market_config.tick_func),
+    tick_func_exists_(tick_func_ != nullptr),
+    short_sell_unable_(market_config.short_sell_unable)
+{
+    config_json_obj_ = market_config.to_json_obj();
+}
+
+
+void BaseStrategy::write_config_to_json(const std::string& json_path) {
+    std::ofstream json_file(json_path);
+    if (json_file.is_open()) {
+        json_file << config_json_obj_;
+        json_file.close();
+    }
+}
+
+
+int64_t BaseStrategy::round_price_in_min_ticks(double price) {
+    return static_cast<int64_t>(std::round(price / min_tick_size_));
+}
+
+
+int64_t BaseStrategy::ceil_price_in_min_ticks(double price) {
+    if (tick_func_exists_) {
+        auto local_tick_size = tick_func_(price);
+        auto ceil_price = std::ceil(price / local_tick_size - 1e-8) * local_tick_size;
+        return round_price_in_min_ticks(ceil_price);
+    } else {
+        return static_cast<int64_t>(std::ceil(price / min_tick_size_ - 1e-8));
+    }
+}
+
+
+int64_t BaseStrategy::floor_price_in_min_ticks(double price) {
+    if (tick_func_exists_) {
+        auto local_tick_size = tick_func_(price);
+        auto floor_price = std::floor(price / local_tick_size + 1e-8) * local_tick_size;
+        return round_price_in_min_ticks(floor_price);
+    } else {
+        return static_cast<int64_t>(std::floor(price / min_tick_size_ + 1e-8));
+    }
+}
+
+
+double BaseStrategy::to_double_price(int64_t price_in_min_ticks) {
+    return static_cast<double>(price_in_min_ticks) * min_tick_size_;
+}
+
+
+int32_t BaseStrategy::round_qty_in_lots(double qty) {
+    return static_cast<int32_t>(std::round(qty / lot_size_));
+}
+
+
+int32_t BaseStrategy::dollar_to_qty_in_lots(double order_dollar, double order_price) {
+    return round_qty_in_lots(order_dollar / order_price);
+}
+
+
+double BaseStrategy::to_double_qty(int32_t qty_in_lots) {
+    return static_cast<double>(qty_in_lots) * lot_size_;
+}
+
+} // namespace Omni::Trader

@@ -17,6 +17,7 @@ class OmniTraderConan(ConanFile):
         self.requires("websocketpp/0.8.2")
         self.requires("concurrentqueue/1.0.4")
         self.requires("openssl/3.3.2")
+        self.requires("argparse/3.2")
 
     def build(self):
         cmake = CMake(self)

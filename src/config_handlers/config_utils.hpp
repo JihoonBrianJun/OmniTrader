@@ -27,8 +27,12 @@ std::pair<bool, T> read_config_file(const std::string& file_path) {
     }
 }
 
-// Base directory holding one exchange's config files, e.g. "./config/binance".
+// Base directory holding one exchange's credential/account files, e.g.
+// "./config/binance".
 std::string config_dir(const std::string& exchange);
+
+// Path to one exchange's domain-endpoints file, e.g. "./domain/binance.json".
+std::string domain_file(const std::string& exchange);
 
 // Generic API credentials. Each exchange's auth_keys.json uses {"key","secret"}.
 // (KIS app_key/app_secret and Binance api_key/secret_key both map onto these.)
@@ -40,8 +44,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(AuthKeys, key, secret)
 
 std::pair<bool, AuthKeys> get_auth_keys(const std::string& exchange);
 
-// domain_config.json is a flat {name: url} object so every exchange can declare
-// whatever endpoints it needs (rest_real, ws_stream, ws_api, *_test, ...).
+// domain/<exchange>.json is a flat {name: url} object so every exchange can
+// declare whatever endpoints it needs (rest_real, ws_stream, ws_api, *_test).
 std::pair<bool, std::map<std::string, std::string>> get_domains(
     const std::string& exchange
 );
