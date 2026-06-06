@@ -1,0 +1,8 @@
+CMakeUserPresets.json
+build/
+logs/
+orderbook_record/
+trade_record/
+config/*
+**/__pycache__/
+*.pyc

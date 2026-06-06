@@ -1,0 +1,343 @@
+#include <iostream>
+#include <sstream>
+#include <algorithm>
+#include <glaze/glaze.hpp>
+#include <quill/LogMacros.h>
+
+#include "common/market_msg_types.hpp"
+#include "tcp_server.hpp"
+
+namespace Omni::Connection {
+
+template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
+template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
+
+
+TcpSession::TcpSession(
+    boost::asio::ip::tcp::socket socket, quill::Logger* logger, TcpServer* server
+)
+:   socket_(std::move(socket)),
+    logger_(logger),
+    server_(server),
+    writing_(false),
+    active_(true)
+{
+}
+
+
+void TcpSession::start() {
+    server_->add_session(shared_from_this());
+    do_read();
+}
+
+
+void TcpSession::send_message(
+    const std::string& message
+) {
+    if (!active_.load()) return;
+
+    write_queue_.enqueue(message);
+
+    bool expected = false;
+    if (writing_.compare_exchange_strong(expected, true)) {
+        do_write();
+    }
+}
+
+
+void TcpSession::close() {
+    active_.store(false);
+    boost::system::error_code ec;
+    socket_.close(ec);
+    server_->remove_session(shared_from_this());
+}
+
+
+void TcpSession::do_read() {
+    auto self(shared_from_this());
+    socket_.async_read_some(
+        boost::asio::buffer(read_buffer_),
+        [this, self](boost::system::error_code ec, std::size_t length) {
+            if (!ec && active_.load()) {
+                read_message_.append(read_buffer_.data(), length);
+
+                size_t pos = 0;
+                while ((pos = read_message_.find('\n')) != std::string::npos) {
+                    std::string line = read_message_.substr(0, pos);
+                    read_message_.erase(0, pos + 1);
+
+                    if (!line.empty()) {
+                        handle_message(line);
+                    }
+                }
+
+                do_read();
+            } else {
+                close();
+            }
+        }
+    );
+}
+
+
+void TcpSession::do_write() {
+    if (!active_.load()) {
+        writing_.store(false);
+        return;
+    }
+
+    std::string message;
+    if (write_queue_.try_dequeue(message)) {
+        auto self(shared_from_this());
+        boost::asio::async_write(
+            socket_,
+            boost::asio::buffer(message + "\n"),
+            [this, self](boost::system::error_code ec, std::size_t /*length*/) {
+                if (!ec && active_.load()) {
+                    std::string next_message;
+                    if (write_queue_.try_dequeue(next_message)) {
+                        do_write();
+                    } else {
+                        writing_.store(false);
+                    }
+                } else {
+                    writing_.store(false);
+                    close();
+                }
+            }
+        );
+    } else {
+        writing_.store(false);
+    }
+}
+
+
+void TcpSession::handle_message(const std::string& message) {
+    try {
+        SubscribeRequestMsg subscribe_request;
+        auto ec = glz::read_json(subscribe_request, message);
+        if (ec) {
+            LOG_WARNING(logger_, "Failed to parse subscribe request ({})", message);
+            return;
+        }
+
+        if (subscribe_request.subscribe) {
+            subscribe_to_code(subscribe_request.code);
+        } else {
+            unsubscribe_from_code(subscribe_request.code);
+        }
+    } catch (const std::exception& e) {
+        LOG_WARNING(logger_, "Error parsing client message: {}", e.what());
+    }
+}
+
+
+void TcpSession::subscribe_to_code(const std::string& code) {
+    server_->notify_subscribe(shared_from_this(), code);
+
+    auto subscribe_response = SubscribeResponseMsg{
+        .subscribe = true, .success = true, .code = code
+    };
+
+    std::string json_buffer;
+    auto ec = glz::write_json(subscribe_response, json_buffer);
+    if (ec) {
+        LOG_WARNING(logger_, "Failed write_json for the subscribe response of code {}", code);
+    } else {
+        send_message(json_buffer);
+    }
+}
+
+
+void TcpSession::unsubscribe_from_code(const std::string& code) {
+    server_->notify_unsubscribe(shared_from_this(), code);
+
+    auto unsubscribe_response = SubscribeResponseMsg{
+        .subscribe = false, .success = true, .code = code
+    };
+
+    std::string json_buffer;
+    auto ec = glz::write_json(unsubscribe_response, json_buffer);
+    if (ec) {
+        LOG_WARNING(logger_, "Failed write_json for the unsubscribe response of code {}", code);
+    } else {
+        send_message(json_buffer);
+    }
+}
+
+
+TcpServer::TcpServer(
+    boost::asio::io_context& io_context,
+    quill::Logger* logger,
+    const std::string& address,
+    unsigned short port
+)
+:   io_context_(io_context),
+    acceptor_(
+        io_context,
+        boost::asio::ip::tcp::endpoint(
+            boost::asio::ip::address::from_string(address), port
+        )
+    ),
+    logger_(logger),
+    running_(false)
+{
+}
+
+
+TcpServer::~TcpServer() {
+    stop();
+}
+
+
+void TcpServer::start() {
+    running_.store(true);
+
+    task_thread_ = std::thread([this]() {
+        broadcast_worker();
+    });
+
+    do_accept();
+}
+
+
+void TcpServer::stop() {
+    running_.store(false);
+
+    boost::system::error_code ec;
+    acceptor_.close(ec);
+
+    for (auto& [session, codes] : session_to_codes_) {
+        session->close();
+    }
+    session_to_codes_.clear();
+    code_to_sessions_.clear();
+
+    if (task_thread_.joinable()) {
+        task_thread_.join();
+    }
+}
+
+
+void TcpServer::broadcast_to_subscribers(
+    const std::string& code, const std::string& json_data
+) {
+    if (!running_.load()) return;
+    task_queue_.enqueue(BroadcastMessage{code, json_data});
+}
+
+
+void TcpServer::add_session(std::shared_ptr<TcpSession> session) {
+    task_queue_.enqueue(SessionCommand{
+        SessionCommand::Type::ADD_SESSION, session
+    });
+}
+
+
+void TcpServer::remove_session(std::shared_ptr<TcpSession> session) {
+    task_queue_.enqueue(SessionCommand{
+        SessionCommand::Type::REMOVE_SESSION, session
+    });
+}
+
+
+void TcpServer::notify_subscribe(std::shared_ptr<TcpSession> session, const std::string& code) {
+    task_queue_.enqueue(SubscriptionCommand{
+        SubscriptionCommand::Type::SUBSCRIBE_CODE, session, code
+    });
+}
+
+
+void TcpServer::notify_unsubscribe(std::shared_ptr<TcpSession> session, const std::string& code) {
+    task_queue_.enqueue(SubscriptionCommand{
+        SubscriptionCommand::Type::UNSUBSCRIBE_CODE, session, code
+    });
+}
+
+
+void TcpServer::do_accept() {
+    auto new_session = std::make_shared<TcpSession>(
+        boost::asio::ip::tcp::socket(io_context_), logger_, this);
+
+    acceptor_.async_accept(
+        new_session->socket(),
+        [this, new_session](boost::system::error_code ec) {
+            if (!ec) {
+                new_session->start();
+            }
+
+            if (running_.load()) {
+                do_accept();
+            }
+        }
+    );
+}
+
+
+void TcpServer::broadcast_worker() {
+    while (running_.load()) {
+        ServerTask task;
+        task_queue_.wait_dequeue(task);
+
+        std::visit(overloaded{
+            [&](const SessionCommand& cmd) {
+                switch (cmd.type) {
+                    case SessionCommand::Type::ADD_SESSION: {
+                        session_to_codes_[cmd.session] = std::unordered_set<std::string>();
+                        break;
+                    }
+                    case SessionCommand::Type::REMOVE_SESSION: {
+                        auto it = session_to_codes_.find(cmd.session);
+                        if (it != session_to_codes_.end()) {
+                            for (const auto& code : it->second) {
+                                auto code_it = code_to_sessions_.find(code);
+                                if (code_it != code_to_sessions_.end()) {
+                                    code_it->second.erase(cmd.session);
+                                    if (code_it->second.empty()) {
+                                        code_to_sessions_.erase(code_it);
+                                    }
+                                }
+                            }
+                            session_to_codes_.erase(it);
+                        }
+                        break;
+                    }
+                }
+            },
+            [&](const SubscriptionCommand& cmd) {
+                switch (cmd.type) {
+                    case SubscriptionCommand::Type::SUBSCRIBE_CODE: {
+                        session_to_codes_[cmd.session].insert(cmd.code);
+                        code_to_sessions_[cmd.code].insert(cmd.session);
+                        break;
+                    }
+                    case SubscriptionCommand::Type::UNSUBSCRIBE_CODE: {
+                        auto session_it = session_to_codes_.find(cmd.session);
+                        if (session_it != session_to_codes_.end()) {
+                            session_it->second.erase(cmd.code);
+                        }
+
+                        auto code_it = code_to_sessions_.find(cmd.code);
+                        if (code_it != code_to_sessions_.end()) {
+                            code_it->second.erase(cmd.session);
+                            if (code_it->second.empty()) {
+                                code_to_sessions_.erase(code_it);
+                            }
+                        }
+                        break;
+                    }
+                }
+            },
+            [&](const BroadcastMessage& msg) {
+                auto it = code_to_sessions_.find(msg.code);
+                if (it != code_to_sessions_.end()) {
+                    for (auto& session : it->second) {
+                        session->send_message(msg.json_data);
+                    }
+                }
+            }
+        }, task);
+    }
+}
+
+} // namespace Omni::Connection
