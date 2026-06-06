@@ -71,7 +71,7 @@ libcurl, websocketpp, concurrentqueue, openssl) are resolved by conan.
 ./build/listener --exchange binance --domain_type test --products BTCUSDT --broadcast_port 8888
 # terminal 2  (tick/lot are fetched from the listener; --min_tick_size/--lot_size
 #              are optional CLI fallbacks used only if the listener doesn't publish them)
-./build/trader --exchange binance --http_domain_type rest_test --trade_products BTCUSDT \
+./build/trader --exchange binance --domain_type test --trade_products BTCUSDT \
     --broadcast_port 8888
 ```
 

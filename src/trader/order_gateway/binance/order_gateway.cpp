@@ -14,7 +14,7 @@ BinanceOrderGateway::BinanceOrderGateway(
 )
 :   logger_(logger)
 {
-    auto domain_type = (config.http_domain_type == "rest_test") ? "test" : "real";
+    const auto& domain_type = config.domain_type;
     auto rest_domain = get_endpoint("rest", domain_type).second;
     auto ws_api_domain = get_endpoint("ws_api", domain_type).second;
     auto signer = make_signer();

@@ -83,27 +83,6 @@ struct GeuantParams {
             program.get<double>("--skew_ratio")
         );
     }
-
-    nlohmann::json to_json_obj() const {
-        return {
-            {"strategy_name", "Geuant"},
-            {"spread_const_bp", spread_const_bp},
-            {"skew_ratio", skew_ratio},
-            {"use_spread_cap", use_spread_cap},
-            {"spread_cap_bp", spread_cap_bp},
-            {"use_bbo_cap_buffer", use_bbo_cap_buffer},
-            {"bbo_cap_buffer_bp", bbo_cap_buffer_bp},
-            {"order_lots", order_lots},
-            {"order_dollar", order_dollar},
-            {"position_limit_in_lots", position_limit_in_lots},
-            {"position_in_dollar", position_in_dollar},
-            {"position_limit_in_dollar", position_limit_in_dollar},
-            {"order_num", order_num},
-            {"order_interval_bp", order_interval_bp},
-            {"tick_based_order_interval", tick_based_order_interval},
-            {"order_interval_ticks", order_interval_ticks},
-        };
-    }
 };
 
 void batch_init(

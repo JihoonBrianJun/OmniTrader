@@ -1,4 +1,3 @@
-#include <fstream>
 #include "base_strategy.hpp"
 
 namespace Omni::Trader {
@@ -22,16 +21,6 @@ BaseStrategy::BaseStrategy(const MarketConfig& market_config)
     tick_func_exists_(tick_func_ != nullptr),
     short_sell_unable_(market_config.short_sell_unable)
 {
-    config_json_obj_ = market_config.to_json_obj();
-}
-
-
-void BaseStrategy::write_config_to_json(const std::string& json_path) {
-    std::ofstream json_file(json_path);
-    if (json_file.is_open()) {
-        json_file << config_json_obj_;
-        json_file.close();
-    }
 }
 
 

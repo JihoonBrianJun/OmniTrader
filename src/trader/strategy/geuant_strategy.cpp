@@ -35,7 +35,6 @@ GeuantStrategy::GeuantStrategy(const MarketConfig& market_config, const GeuantPa
 :   BaseStrategy(market_config),
     params_(params)
 {
-    config_json_obj_.update(params.to_json_obj());
 }
 
 

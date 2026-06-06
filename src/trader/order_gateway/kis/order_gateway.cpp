@@ -12,7 +12,8 @@ namespace Omni::KIS {
 std::unique_ptr<Omni::OrderGateway::IOrderGateway> create_kis_order_gateway(
     const Omni::Trader::TraderConfig& config, quill::Logger* logger
 ) {
-    auto http_domain = Omni::Config::get_domain(Config::EXCHANGE, config.http_domain_type).second;
+    auto rest_domain_type = (config.domain_type == "test") ? "rest_test" : "rest_real";
+    auto http_domain = Omni::Config::get_domain(Config::EXCHANGE, rest_domain_type).second;
 
     if (config.market_type == "stock") {
         return std::make_unique<OrderGateway::KoreanStockOrderGateway>(logger, http_domain);

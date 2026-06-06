@@ -47,13 +47,12 @@ struct TraderConfig {
     std::string strategy_name = "Geuant";
     std::string region = "";
     std::string market_type = "derivatives";
-    std::string product = "BTCUSDT";
     std::vector<std::string> trade_products = {"BTCUSDT"};
     bool subscribe_same_products = true;
     std::vector<std::string> subscribe_products = {"BTCUSDT"};
     std::string broadcast_host_address = "0.0.0.0";
     unsigned short broadcast_port = 8888;
-    std::string http_domain_type = "rest_real";
+    std::string domain_type = "real";   // selects real vs test endpoints (REST + WS-API)
     long order_update_interval_ms = 1000;
 
     // Loop-control / logging.
@@ -73,7 +72,6 @@ struct TraderConfig {
         set_header_parser(program);
         program.add_argument("--region").default_value(std::string(""));
         program.add_argument("--market_type").default_value(std::string("derivatives"));
-        program.add_argument("--product").default_value(std::string("BTCUSDT"));
         program.add_argument("--trade_products")
             .nargs(argparse::nargs_pattern::any)
             .default_value(std::vector<std::string>{"BTCUSDT"});
@@ -82,7 +80,7 @@ struct TraderConfig {
             .default_value(std::vector<std::string>{});
         program.add_argument("--broadcast_host_address").default_value(std::string("0.0.0.0"));
         program.add_argument("--broadcast_port").scan<'i', int>().default_value(8888);
-        program.add_argument("--http_domain_type").default_value(std::string("rest_real"));
+        program.add_argument("--domain_type").default_value(std::string("real"));
         program.add_argument("--order_update_interval_ms").scan<'i', int64_t>().default_value(int64_t{1000});
         program.add_argument("--timezone_minute_offset").scan<'i', int64_t>().default_value(int64_t{0});
         program.add_argument("--market_end_intraday_minute").scan<'i', int64_t>().default_value(int64_t{-1});
@@ -95,14 +93,13 @@ struct TraderConfig {
         strategy_name = program.get<std::string>("--strategy_name");
         region = program.get<std::string>("--region");
         market_type = program.get<std::string>("--market_type");
-        product = program.get<std::string>("--product");
         trade_products = program.get<std::vector<std::string>>("--trade_products");
         subscribe_products = program.get<std::vector<std::string>>("--subscribe_products");
         subscribe_same_products = subscribe_products.empty();
         if (subscribe_same_products) subscribe_products = trade_products;
         broadcast_host_address = program.get<std::string>("--broadcast_host_address");
         broadcast_port = static_cast<unsigned short>(program.get<int>("--broadcast_port"));
-        http_domain_type = program.get<std::string>("--http_domain_type");
+        domain_type = program.get<std::string>("--domain_type");
         order_update_interval_ms = program.get<int64_t>("--order_update_interval_ms");
         timezone_minute_offset = program.get<int64_t>("--timezone_minute_offset");
         market_end_intraday_minute = program.get<int64_t>("--market_end_intraday_minute");

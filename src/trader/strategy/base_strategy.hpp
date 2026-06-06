@@ -5,7 +5,6 @@
 #include <cmath>
 #include <string>
 #include <cstdint>
-#include <nlohmann/json.hpp>
 #include <argparse/argparse.hpp>
 
 #include "trader/pricer/pricer_dtypes.hpp"
@@ -22,8 +21,6 @@ struct MarketConfig {
     double contract_multiplier;
     double fee_rate_bp;
     std::string exchange;
-    std::string product;
-    std::string json_write_path;
     Omni::TickFunc tick_func;
     bool short_sell_unable = false;
 
@@ -50,22 +47,8 @@ struct MarketConfig {
         contract_multiplier = program.get<double>("--contract_multiplier");
         fee_rate_bp = program.get<double>("--fee_rate_bp");
         exchange = program.get<std::string>("--exchange");
-        product = program.get<std::string>("--product");
-        json_write_path = program.get<std::string>("--log_base_path") + "/config.json";
         tick_func = Omni::get_tick_func(exchange);
         short_sell_unable = program.get<bool>("--short_sell_unable");
-    }
-
-    nlohmann::json to_json_obj() const {
-        return {
-            {"exchange", exchange},
-            {"product", product},
-            {"min_tick_size", min_tick_size},
-            {"lot_size", lot_size},
-            {"contract_multiplier", contract_multiplier},
-            {"fee_rate_bp", fee_rate_bp},
-            {"short_sell_unable", short_sell_unable},
-        };
     }
 };
 
@@ -82,8 +65,6 @@ class BaseStrategy {
 public:
     BaseStrategy(const MarketConfig& market_config);
     virtual ~BaseStrategy() = default;
-
-    void write_config_to_json(const std::string& json_path);
 
     // Update tick/lot at runtime (e.g. once the listener publishes product info).
     void set_market_params(double min_tick_size, double lot_size) {
@@ -106,7 +87,6 @@ protected:
     double min_tick_size_, lot_size_;
     Omni::TickFunc tick_func_;
     bool tick_func_exists_, short_sell_unable_;
-    nlohmann::json config_json_obj_;
 
     int64_t round_price_in_min_ticks(double price);
     int64_t ceil_price_in_min_ticks(double price);
