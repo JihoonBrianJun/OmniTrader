@@ -280,6 +280,18 @@ void TcpClient::handle_message(const std::string& message) {
                 .product = position_msg.product,
                 .data = position_msg.position_data
             });
+        } else if (feed_classifier.feed == "product_info") {
+            ProductInfoMsg product_info_msg;
+            auto ec = glz::read_json(product_info_msg, message);
+            if (ec) {
+                LOG_WARNING(logger_, "Failed to parse product_info msg ({})", message);
+                return;
+            }
+            task_queue_->enqueue(Omni::Trader::TcpMarketDataResponse{
+                .feed = Omni::Trader::TcpMarketDataResponse::ProductInfo,
+                .product = product_info_msg.product,
+                .data = product_info_msg.product_info_data
+            });
         }
     } catch (const std::exception& e) {
         LOG_WARNING(logger_, "Error parsing server message: {}", e.what());

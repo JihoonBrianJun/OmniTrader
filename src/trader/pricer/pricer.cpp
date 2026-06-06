@@ -10,6 +10,12 @@ Pricer::Pricer(double min_tick_size, double lot_size)
 }
 
 
+void Pricer::set_params(double min_tick_size, double lot_size) {
+    min_tick_size_ = min_tick_size;
+    lot_size_ = lot_size;
+}
+
+
 double Pricer::to_double_price(int64_t price_in_min_ticks) {
     return static_cast<double>(price_in_min_ticks) * min_tick_size_;
 }

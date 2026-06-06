@@ -11,6 +11,8 @@ class Pricer {
 public:
     Pricer(double min_tick_size, double lot_size);
 
+    void set_params(double min_tick_size, double lot_size);
+
     void fetch_mid_price(const L1& l1, PriceInfo& price_info);
     void fetch_vwap(const L1& l1, PriceInfo& price_info);
 

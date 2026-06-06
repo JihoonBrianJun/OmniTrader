@@ -69,8 +69,15 @@ struct BroadcastMessage {
     std::string json_data;
 };
 
+// A retained (last-value) message per product, replayed to each new subscriber
+// (used for product info so late-joining traders learn tick/lot immediately).
+struct RetainMessage {
+    std::string product;
+    std::string json_data;
+};
+
 using ServerTask = std::variant<
-    SessionCommand, SubscriptionCommand, BroadcastMessage
+    SessionCommand, SubscriptionCommand, BroadcastMessage, RetainMessage
 >;
 
 class TcpServer {
@@ -88,6 +95,8 @@ class TcpServer {
         void broadcast_to_subscribers(
             const std::string& product, const std::string& json_data
         );
+        // Set the retained message for a product (replayed to new subscribers).
+        void set_retained(const std::string& product, const std::string& json_data);
 
         void add_session(std::shared_ptr<TcpSession> session);
         void remove_session(std::shared_ptr<TcpSession> session);
@@ -105,6 +114,7 @@ class TcpServer {
 
         std::unordered_map<std::shared_ptr<TcpSession>, std::unordered_set<std::string>> session_to_products_;
         std::unordered_map<std::string, std::unordered_set<std::shared_ptr<TcpSession>>> product_to_sessions_;
+        std::unordered_map<std::string, std::string> retained_;
 
         moodycamel::BlockingConcurrentQueue<ServerTask> task_queue_;
         std::thread task_thread_;

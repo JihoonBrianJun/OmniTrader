@@ -47,6 +47,7 @@ OrderHandler::OrderHandler(
     order_update_interval_ns_(config.order_update_interval_ms * 1000000),
     order_gateway_(create_order_gateway(config, logger)),
     pricer_(market_config.min_tick_size, market_config.lot_size),
+    product_info_ready_(market_config.min_tick_size > 0 && market_config.lot_size > 0),
     io_context_(std::make_unique<boost::asio::io_context>()),
     tcp_connecting_(false),
     tcp_connected_(false)
@@ -245,6 +246,21 @@ void OrderHandler::on_position(const std::string& product, const PositionData& d
 }
 
 
+void OrderHandler::on_product_info(const std::string& product, const ProductInfoData& data) {
+    if (!data.min_tick_size.has_value() || !data.lot_size.has_value()) return;
+    double min_tick = data.min_tick_size.value();
+    double lot = data.lot_size.value();
+    if (min_tick <= 0 || lot <= 0) return;
+
+    min_tick_size_ = min_tick;
+    lot_size_ = lot;
+    pricer_.set_params(min_tick, lot);
+    strategy_->set_market_params(min_tick, lot);
+    product_info_ready_ = true;
+    LOG_INFO(logger_, "[ProductInfo] {} min_tick_size={} lot_size={}", product, min_tick, lot);
+}
+
+
 void OrderHandler::process_market_data(const TcpMarketDataResponse& response) {
     switch (response.feed) {
         case TcpMarketDataResponse::Feed::Orderbook:
@@ -258,6 +274,9 @@ void OrderHandler::process_market_data(const TcpMarketDataResponse& response) {
         case TcpMarketDataResponse::Feed::Position:
             on_position(response.product, std::get<PositionData>(response.data));
             break;
+        case TcpMarketDataResponse::Feed::ProductInfo:
+            on_product_info(response.product, std::get<ProductInfoData>(response.data));
+            break;
         case TcpMarketDataResponse::Error:
             break;
     }
@@ -268,6 +287,9 @@ void OrderHandler::update_orders(const std::string& product) {
     auto state_it = product_states_.find(product);
     if (state_it == product_states_.end()) return;
     auto& state = state_it->second;
+
+    // Wait until tick/lot are known (from listener product info or CLI fallback).
+    if (!product_info_ready_) return;
 
     if (!state.response_waiting.no_waiting_orders()) return;
 

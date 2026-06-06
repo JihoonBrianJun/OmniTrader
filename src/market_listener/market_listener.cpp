@@ -159,6 +159,19 @@ void MarketListener::listen() {
         },
         [&](const PositionMsg& msg) {
             broadcast_market_data<PositionMsg>(msg);
+        },
+        [&](const ProductInfoMsg& msg) {
+            // Broadcast to current subscribers and retain for late joiners.
+            try {
+                std::string json_buffer;
+                if (!glz::write_json(msg, json_buffer)) {
+                    tcp_server_->broadcast_to_subscribers(msg.product, json_buffer);
+                    tcp_server_->set_retained(msg.product, json_buffer);
+                    LOG_INFO(logger_, "{}", json_buffer);
+                }
+            } catch (const std::exception& e) {
+                LOG_WARNING(logger_, "Exception broadcasting product info: {}", e.what());
+            }
         }
     }, event);
 }

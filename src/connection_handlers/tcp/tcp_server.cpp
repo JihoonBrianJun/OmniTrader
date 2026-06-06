@@ -227,6 +227,14 @@ void TcpServer::broadcast_to_subscribers(
 }
 
 
+void TcpServer::set_retained(
+    const std::string& product, const std::string& json_data
+) {
+    if (!running_.load()) return;
+    task_queue_.enqueue(RetainMessage{product, json_data});
+}
+
+
 void TcpServer::add_session(std::shared_ptr<TcpSession> session) {
     task_queue_.enqueue(SessionCommand{
         SessionCommand::Type::ADD_SESSION, session
@@ -309,6 +317,12 @@ void TcpServer::broadcast_worker() {
                     case SubscriptionCommand::Type::SUBSCRIBE_PRODUCT: {
                         session_to_products_[cmd.session].insert(cmd.product);
                         product_to_sessions_[cmd.product].insert(cmd.session);
+                        // Replay the retained message (e.g. product info) so a
+                        // late-joining subscriber gets it immediately.
+                        auto retained_it = retained_.find(cmd.product);
+                        if (retained_it != retained_.end()) {
+                            cmd.session->send_message(retained_it->second);
+                        }
                         break;
                     }
                     case SubscriptionCommand::Type::UNSUBSCRIBE_PRODUCT: {
@@ -335,6 +349,9 @@ void TcpServer::broadcast_worker() {
                         session->send_message(msg.json_data);
                     }
                 }
+            },
+            [&](const RetainMessage& msg) {
+                retained_[msg.product] = msg.json_data;
             }
         }, task);
     }

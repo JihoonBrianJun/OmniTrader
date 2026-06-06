@@ -50,6 +50,10 @@ private:
     std::unique_ptr<Omni::OrderGateway::IOrderGateway> order_gateway_;
     Pricer pricer_;
 
+    // tick/lot become ready either from CLI fallback (if provided) or once the
+    // listener publishes product info; orders wait until then.
+    bool product_info_ready_;
+
     std::map<std::string, ProductState> product_states_;
     std::map<std::string, std::string> order_no_to_product_;
 
@@ -76,6 +80,7 @@ private:
     void on_orderbook(const std::string& product, const OrderbookData& data);
     void on_execution(const std::string& product, const ExecutionData& data);
     void on_position(const std::string& product, const PositionData& data);
+    void on_product_info(const std::string& product, const ProductInfoData& data);
     void update_orders(const std::string& product);
 };
 

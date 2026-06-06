@@ -13,7 +13,9 @@ template<typename T>
 std::pair<bool, T> read_config_file(const std::string& file_path) {
     std::ifstream file(file_path);
     if (!file.is_open()) {
-        fmt::println("Failed to open config file: {}", file_path);
+        // Missing file is benign for optional config (e.g. credentials for a
+        // public-data-only listener); callers report a meaningful warning. Stay
+        // silent here to avoid log spam.
         return std::make_pair(false, T{});
     }
 

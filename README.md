@@ -69,10 +69,15 @@ libcurl, websocketpp, concurrentqueue, openssl) are resolved by conan.
 ```bash
 # terminal 1
 ./build/listener --exchange binance --domain_type test --products BTCUSDT --broadcast_port 8888
-# terminal 2
+# terminal 2  (tick/lot are fetched from the listener; --min_tick_size/--lot_size
+#              are optional CLI fallbacks used only if the listener doesn't publish them)
 ./build/trader --exchange binance --http_domain_type rest_test --trade_products BTCUSDT \
-    --min_tick_size 0.1 --lot_size 0.001 --broadcast_port 8888
+    --broadcast_port 8888
 ```
+
+The listener publishes per-product trading parameters (tick/lot from Binance
+`exchangeInfo`) as a retained `product_info` message; the trader consumes it and
+configures its pricer/strategy, so you don't pass tick/lot on the trader CLI.
 
 ## Run (KIS)
 

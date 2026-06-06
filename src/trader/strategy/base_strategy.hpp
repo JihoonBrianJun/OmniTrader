@@ -85,6 +85,12 @@ public:
 
     void write_config_to_json(const std::string& json_path);
 
+    // Update tick/lot at runtime (e.g. once the listener publishes product info).
+    void set_market_params(double min_tick_size, double lot_size) {
+        min_tick_size_ = min_tick_size;
+        lot_size_ = lot_size;
+    }
+
     virtual void make_decision(
         const PriceInfo& price_info,
         bool do_liquidate,

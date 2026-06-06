@@ -92,6 +92,19 @@ struct PositionMsg {
     PositionData position_data = {};
 };
 
+// Per-product trading parameters published by the listener (Binance: from
+// exchangeInfo filters; other exchanges may omit). The trader uses these instead
+// of CLI-provided tick/lot.
+struct ProductInfoData {
+    std::optional<double> min_tick_size = std::nullopt;
+    std::optional<double> lot_size = std::nullopt;
+};
+struct ProductInfoMsg {
+    std::string feed = "product_info";
+    std::string product = "";
+    ProductInfoData product_info_data = {};
+};
+
 // Used for glaze partial read to classify an incoming TCP line by feed.
 struct FeedClassifier {
     std::string feed;

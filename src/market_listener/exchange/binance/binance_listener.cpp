@@ -108,6 +108,17 @@ void BinanceListener::start() {
 
     product_manager_->load();
 
+    // Publish per-product trading parameters (tick/lot from exchangeInfo) so the
+    // trader can use them instead of CLI-provided values.
+    for (const auto& product : products_) {
+        auto f = product_manager_->filter(product);
+        Omni::ProductInfoMsg msg;
+        msg.product = product;
+        msg.product_info_data.min_tick_size = f.tick_size;
+        msg.product_info_data.lot_size = f.step_size;
+        event_queue_->enqueue(std::move(msg));
+    }
+
     io_thread_ = std::thread([this]() {
         auto work_guard = boost::asio::make_work_guard(*io_context_);
         try {
