@@ -2,6 +2,8 @@
 #include <string>
 #include <vector>
 #include <variant>
+#include <cstdint>
+#include <argparse/argparse.hpp>
 
 #include "common/market_msg_types.hpp"
 
@@ -34,6 +36,49 @@ struct ListenerConfig {
     unsigned short broadcast_port = 8888;
     std::string domain_type = "real";    // selects real vs test endpoints
     int orderbook_levels = 20;           // top-N levels to broadcast
+
+    // Loop-control / logging (not consumed by the adapters but owned here so the
+    // whole listener configuration is registered and populated in one place).
+    long market_end_intraday_minute = -1;
+    std::string log_path = "logs/listener.log";
+
+    static void set_parser(argparse::ArgumentParser& program) {
+        program.add_argument("--exchange").default_value(std::string("binance"));
+        program.add_argument("--region").default_value(std::string(""));
+        program.add_argument("--market_type").default_value(std::string("derivatives"));
+        program.add_argument("--is_night").flag();
+        program.add_argument("--timezone_minute_offset").scan<'i', int64_t>().default_value(int64_t{0});
+        program.add_argument("--market_end_intraday_minute").scan<'i', int64_t>().default_value(int64_t{-1});
+        program.add_argument("--codes")
+            .nargs(argparse::nargs_pattern::any)
+            .default_value(std::vector<std::string>{"BTCUSDT"});
+        program.add_argument("--codes_db_base_path").default_value(std::string("codes"));
+        program.add_argument("--orderbook_save_path").default_value(std::string("orderbook_record"));
+        program.add_argument("--trade_save_path").default_value(std::string("trade_record"));
+        program.add_argument("--orderbook_levels").scan<'i', int>().default_value(20);
+        program.add_argument("--broadcast_host_address").default_value(std::string("0.0.0.0"));
+        program.add_argument("--broadcast_port").scan<'i', int>().default_value(8888);
+        program.add_argument("--domain_type").default_value(std::string("real"));
+        program.add_argument("--log_path").default_value(std::string("logs/listener.log"));
+    }
+
+    void init(const argparse::ArgumentParser& program) {
+        exchange = program.get<std::string>("--exchange");
+        region = program.get<std::string>("--region");
+        market_type = program.get<std::string>("--market_type");
+        is_night = program.get<bool>("--is_night");
+        timezone_minute_offset = program.get<int64_t>("--timezone_minute_offset");
+        market_end_intraday_minute = program.get<int64_t>("--market_end_intraday_minute");
+        codes = program.get<std::vector<std::string>>("--codes");
+        codes_db_base_path = program.get<std::string>("--codes_db_base_path");
+        orderbook_save_path = program.get<std::string>("--orderbook_save_path");
+        trade_save_path = program.get<std::string>("--trade_save_path");
+        orderbook_levels = program.get<int>("--orderbook_levels");
+        broadcast_host_address = program.get<std::string>("--broadcast_host_address");
+        broadcast_port = static_cast<unsigned short>(program.get<int>("--broadcast_port"));
+        domain_type = program.get<std::string>("--domain_type");
+        log_path = program.get<std::string>("--log_path");
+    }
 };
 
 struct OrderbookCsvSchema {
