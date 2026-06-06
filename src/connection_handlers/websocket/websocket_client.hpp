@@ -5,6 +5,9 @@
 #include <memory>
 #include <thread>
 #include <type_traits>
+#include <vector>
+#include <fstream>
+#include <cstdlib>
 
 #include <quill/Logger.h>
 #include <quill/LogMacros.h>
@@ -57,7 +60,7 @@ class BaseWebsocketClient : public websocketpp::client<Config> {
 
             if constexpr (is_tls) {
                 this->set_tls_init_handler(
-                    [](websocketpp::connection_hdl) {
+                    [this](websocketpp::connection_hdl) {
                         auto ctx = websocketpp::lib::make_shared<boost::asio::ssl::context>(
                             boost::asio::ssl::context::sslv23
                         );
@@ -67,7 +70,7 @@ class BaseWebsocketClient : public websocketpp::client<Config> {
                             boost::asio::ssl::context::no_sslv3 |
                             boost::asio::ssl::context::single_dh_use
                         );
-                        ctx->set_default_verify_paths();
+                        load_ca_trust(*ctx);
                         ctx->set_verify_mode(boost::asio::ssl::verify_peer);
                         return ctx;
                     }
@@ -150,6 +153,15 @@ class BaseWebsocketClient : public websocketpp::client<Config> {
                 connecting_.store(false);
                 opened_.store(false);
 
+                auto conn = this->get_con_from_hdl(hdl);
+                LOG_WARNING(
+                    logger_,
+                    "Connection failed: {} (ws_state={}, http_status={})",
+                    conn->get_ec().message(),
+                    static_cast<int>(conn->get_state()),
+                    static_cast<int>(conn->get_response_code())
+                );
+
                 notify_websocket_status();
             });
 
@@ -225,6 +237,37 @@ class BaseWebsocketClient : public websocketpp::client<Config> {
                     LOG_WARNING(logger_, "Ping Timer Error: {}", ec.message());
                 }
             });
+        }
+
+        // conan's OpenSSL has no usable default CA store on macOS, so seed the
+        // verify store from common bundle locations (and SSL_CERT_FILE) in
+        // addition to the built-in default paths.
+        void load_ca_trust(boost::asio::ssl::context& ctx) {
+            boost::system::error_code ec;
+            ctx.set_default_verify_paths(ec);
+
+            std::vector<std::string> candidates;
+            if (const char* env = std::getenv("SSL_CERT_FILE")) candidates.emplace_back(env);
+            candidates.insert(candidates.end(), {
+                "/etc/ssl/cert.pem",                          // macOS / LibreSSL
+                "/opt/homebrew/etc/openssl@3/cert.pem",       // Homebrew (arm64)
+                "/opt/homebrew/etc/ca-certificates/cert.pem",
+                "/usr/local/etc/openssl@3/cert.pem",          // Homebrew (x86_64)
+                "/etc/ssl/certs/ca-certificates.crt",         // Debian/Ubuntu
+                "/etc/pki/tls/certs/ca-bundle.crt"            // RHEL/Fedora
+            });
+
+            for (const auto& path : candidates) {
+                std::ifstream f(path);
+                if (!f.good()) continue;
+                boost::system::error_code load_ec;
+                ctx.load_verify_file(path, load_ec);
+                if (!load_ec) {
+                    LOG_INFO(logger_, "Loaded CA trust bundle: {}", path);
+                    return;
+                }
+            }
+            LOG_WARNING(logger_, "No CA trust bundle found; TLS verification may fail");
         }
 
         static std::string extract_host(const std::string& uri) {
