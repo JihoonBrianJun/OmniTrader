@@ -127,10 +127,15 @@ void TcpClient::send_message(const std::string& message) {
 
     write_queue_.enqueue(message);
 
-    bool expected = false;
-    if (writing_.compare_exchange_strong(expected, true)) {
-        do_write();
-    }
+    // Serialize writes on the socket's executor: send_message runs on the caller
+    // thread (e.g. the order handler) while do_write continuations run on the io
+    // thread, so driving do_write directly here would race on the same socket.
+    boost::asio::post(socket_.get_executor(), [this]() {
+        bool expected = false;
+        if (writing_.compare_exchange_strong(expected, true)) {
+            do_write();
+        }
+    });
 }
 
 

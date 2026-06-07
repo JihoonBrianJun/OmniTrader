@@ -38,10 +38,18 @@ void TcpSession::send_message(
 
     write_queue_.enqueue(message);
 
-    bool expected = false;
-    if (writing_.compare_exchange_strong(expected, true)) {
-        do_write();
-    }
+    // send_message is called from multiple threads (the io_context thread for the
+    // subscribe ack, and the broadcast_worker thread for broadcasts/retained
+    // replays). Drive do_write strictly on the socket's executor so all writes
+    // (and the writing_ flag) are serialized on one thread; otherwise the ack and
+    // a retained replay can race and corrupt/drop a message on the same socket.
+    auto self = shared_from_this();
+    boost::asio::post(socket_.get_executor(), [this, self]() {
+        bool expected = false;
+        if (writing_.compare_exchange_strong(expected, true)) {
+            do_write();
+        }
+    });
 }
 
 
@@ -320,6 +328,10 @@ void TcpServer::broadcast_worker() {
                         // Replay the retained message (e.g. product info) so a
                         // late-joining subscriber gets it immediately.
                         auto retained_it = retained_.find(cmd.product);
+                        LOG_INFO(
+                            logger_, "[Retain] SUBSCRIBE {} retained_size={} found={}",
+                            cmd.product, retained_.size(), retained_it != retained_.end()
+                        );
                         if (retained_it != retained_.end()) {
                             cmd.session->send_message(retained_it->second);
                         }
@@ -352,6 +364,10 @@ void TcpServer::broadcast_worker() {
             },
             [&](const RetainMessage& msg) {
                 retained_[msg.product] = msg.json_data;
+                LOG_INFO(
+                    logger_, "[Retain] STORE {} retained_size={}",
+                    msg.product, retained_.size()
+                );
             }
         }, task);
     }

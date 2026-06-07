@@ -285,17 +285,43 @@ void OrderHandler::process_market_data(const TcpMarketDataResponse& response) {
 
 void OrderHandler::update_orders(const std::string& product) {
     auto state_it = product_states_.find(product);
-    if (state_it == product_states_.end()) return;
+    if (state_it == product_states_.end()) {
+        LOG_WARNING(logger_, "[Decision] {} skipped: no product state", product);
+        return;
+    }
     auto& state = state_it->second;
 
     // Wait until tick/lot are known (from listener product info or CLI fallback).
-    if (!product_info_ready_) return;
+    if (!product_info_ready_) {
+        LOG_INFO(logger_, "[Decision] {} skipped: product info (tick/lot) not ready", product);
+        return;
+    }
 
-    if (!state.response_waiting.no_waiting_orders()) return;
+    if (!state.response_waiting.no_waiting_orders()) {
+        LOG_INFO(
+            logger_, "[Decision] {} skipped: waiting on responses (place={}, cancel={})",
+            product,
+            state.response_waiting.response_waiting_place_orders.size(),
+            state.response_waiting.response_waiting_cancel_orders.size()
+        );
+        return;
+    }
 
     PriceInfo price_info;
     pricer_.fetch_mid_price(state.l1, price_info);
-    if (std::isnan(price_info.mid_price)) return;
+    LOG_INFO(
+        logger_,
+        "[Decision] {} bbid={} bask={} mid={} fair={} position_lots={} outstanding={}",
+        product,
+        to_double_price(price_info.bbid_price_in_min_ticks),
+        to_double_price(price_info.bask_price_in_min_ticks),
+        price_info.mid_price, price_info.fair_price,
+        state.position_in_lots, state.outstanding_orders.size()
+    );
+    if (std::isnan(price_info.mid_price)) {
+        LOG_INFO(logger_, "[Decision] {} skipped: mid price is NaN (no L1 yet)", product);
+        return;
+    }
 
     std::map<int64_t, int32_t> bid_place_orders, ask_place_orders;
     std::vector<uint32_t> bid_cancel_orders, ask_cancel_orders;
@@ -304,12 +330,30 @@ void OrderHandler::update_orders(const std::string& product) {
         bid_place_orders, ask_place_orders, bid_cancel_orders, ask_cancel_orders
     );
 
+    for (const auto& [price_in_min_ticks, qty_in_lots] : bid_place_orders) {
+        LOG_INFO(logger_, "[Decision] {} want BID px={} qty={}",
+                 product, to_double_price(price_in_min_ticks), to_double_qty(qty_in_lots));
+    }
+    for (const auto& [price_in_min_ticks, qty_in_lots] : ask_place_orders) {
+        LOG_INFO(logger_, "[Decision] {} want ASK px={} qty={}",
+                 product, to_double_price(price_in_min_ticks), to_double_qty(qty_in_lots));
+    }
+    LOG_INFO(
+        logger_, "[Decision] {} decided: place(bid={}, ask={}) cancel(bid={}, ask={})",
+        product, bid_place_orders.size(), ask_place_orders.size(),
+        bid_cancel_orders.size(), ask_cancel_orders.size()
+    );
+
     auto submit_cancel = [&](uint32_t cid) {
         auto on_it = state.cid_to_order_no.find(cid);
         if (on_it == state.cid_to_order_no.end()) return;
         Omni::OrderGateway::OrderCancelInfo info{.order_no = on_it->second, .product = product};
         Omni::OrderGateway::OrderResponse resp;
         order_gateway_->cancel_order(info, resp);
+        LOG_INFO(
+            logger_, "[Order Cancel] {} order_no={} success={} msg={}",
+            product, info.order_no, resp.success, resp.msg
+        );
         if (resp.success) {
             // synchronous ack: drop the order locally
             order_no_to_product_.erase(on_it->second);
@@ -332,6 +376,10 @@ void OrderHandler::update_orders(const std::string& product) {
         };
         Omni::OrderGateway::OrderResponse resp;
         order_gateway_->place_order(info, resp);
+        LOG_INFO(
+            logger_, "[Order Place] {} is_bid={} px={} qty={} success={} order_no={} msg={}",
+            product, is_bid, info.price, info.qty, resp.success, resp.order_no, resp.msg
+        );
         if (resp.success && !resp.order_no.empty()) {
             uint32_t cid = state.next_cid++;
             state.outstanding_orders[cid] = OutstandingOrder{
@@ -342,10 +390,6 @@ void OrderHandler::update_orders(const std::string& product) {
             state.cid_to_order_no[cid] = resp.order_no;
             state.order_no_to_cid[resp.order_no] = cid;
             order_no_to_product_[resp.order_no] = product;
-            LOG_INFO(
-                logger_, "[Order Place] {} order_no={} is_bid={} px={} qty={}",
-                product, resp.order_no, is_bid, info.price, info.qty
-            );
         }
     };
     for (const auto& [price_in_min_ticks, qty_in_lots] : bid_place_orders) {
