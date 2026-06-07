@@ -19,7 +19,8 @@ struct ListenerStatusUpdate {
 // Normalized events flowing adapter -> MarketListener. The listener broadcasts
 // these over TCP and (for market data) CSV-logs them.
 using ListenerEvent = std::variant<
-    ListenerStatusUpdate, OrderbookMsg, TradeMsg, ExecutionMsg, PositionMsg, ProductInfoMsg
+    ListenerStatusUpdate, OrderbookMsg, TradeMsg, ExecutionMsg, PositionMsg,
+    BalanceMsg, ProductInfoMsg
 >;
 
 struct ListenerConfig {

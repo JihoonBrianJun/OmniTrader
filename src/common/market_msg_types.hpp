@@ -92,6 +92,21 @@ struct PositionMsg {
     PositionData position_data = {};
 };
 
+// Account-level asset balance (Binance: /fapi/v2/balance snapshot + ACCOUNT_UPDATE
+// "B" stream updates). Not tied to a product, so the listener routes it to every
+// connected trader regardless of subscription. wallet_balance is the total asset
+// balance; available_balance is what's free for new orders (snapshot only — the
+// stream update carries wallet balance but not available).
+struct BalanceData {
+    std::optional<double> wallet_balance = std::nullopt;
+    std::optional<double> available_balance = std::nullopt;
+};
+struct BalanceMsg {
+    std::string feed = "balance";
+    std::string asset = "";
+    BalanceData balance_data = {};
+};
+
 // Per-product trading parameters published by the listener (Binance: from
 // exchangeInfo filters; other exchanges may omit). The trader uses these instead
 // of CLI-provided tick/lot.

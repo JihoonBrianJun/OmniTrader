@@ -243,6 +243,14 @@ void TcpServer::set_retained(
 }
 
 
+void TcpServer::broadcast_to_all(
+    const std::string& key, const std::string& json_data
+) {
+    if (!running_.load()) return;
+    task_queue_.enqueue(BroadcastAllMessage{key, json_data});
+}
+
+
 void TcpServer::add_session(std::shared_ptr<TcpSession> session) {
     task_queue_.enqueue(SessionCommand{
         SessionCommand::Type::ADD_SESSION, session
@@ -300,6 +308,11 @@ void TcpServer::broadcast_worker() {
                 switch (cmd.type) {
                     case SessionCommand::Type::ADD_SESSION: {
                         session_to_products_[cmd.session] = std::unordered_set<std::string>();
+                        // Replay account-level retained messages (e.g. balances) so
+                        // a new session has them immediately, before any subscribe.
+                        for (const auto& [key, json_data] : account_retained_) {
+                            cmd.session->send_message(json_data);
+                        }
                         break;
                     }
                     case SessionCommand::Type::REMOVE_SESSION: {
@@ -368,6 +381,12 @@ void TcpServer::broadcast_worker() {
                     logger_, "[Retain] STORE {} retained_size={}",
                     msg.product, retained_.size()
                 );
+            },
+            [&](const BroadcastAllMessage& msg) {
+                account_retained_[msg.key] = msg.json_data;
+                for (auto& [session, products] : session_to_products_) {
+                    session->send_message(msg.json_data);
+                }
             }
         }, task);
     }

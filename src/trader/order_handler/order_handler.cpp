@@ -246,6 +246,33 @@ void OrderHandler::on_position(const std::string& product, const PositionData& d
 }
 
 
+void OrderHandler::on_balance(const std::string& asset, const BalanceData& data) {
+    auto& bal = balances_[asset];
+    // Merge: stream updates carry wallet balance but not available; keep the last
+    // known available until the next snapshot refreshes it.
+    if (data.wallet_balance.has_value()) bal.wallet_balance = data.wallet_balance;
+    if (data.available_balance.has_value()) bal.available_balance = data.available_balance;
+    LOG_INFO(
+        logger_, "[Balance] {} wallet={} available={}",
+        asset, bal.wallet_balance.value_or(NAN), bal.available_balance.value_or(NAN)
+    );
+}
+
+
+std::string OrderHandler::format_balances() const {
+    if (balances_.empty()) return "(none)";
+    std::string out;
+    for (const auto& [asset, bal] : balances_) {
+        if (!out.empty()) out += " ";
+        out += fmt::format(
+            "{}(wallet={},avail={})",
+            asset, bal.wallet_balance.value_or(NAN), bal.available_balance.value_or(NAN)
+        );
+    }
+    return out;
+}
+
+
 void OrderHandler::on_product_info(const std::string& product, const ProductInfoData& data) {
     if (!data.min_tick_size.has_value() || !data.lot_size.has_value()) return;
     double min_tick = data.min_tick_size.value();
@@ -273,6 +300,9 @@ void OrderHandler::process_market_data(const TcpMarketDataResponse& response) {
             break;
         case TcpMarketDataResponse::Feed::Position:
             on_position(response.product, std::get<PositionData>(response.data));
+            break;
+        case TcpMarketDataResponse::Feed::Balance:
+            on_balance(response.product, std::get<BalanceData>(response.data));
             break;
         case TcpMarketDataResponse::Feed::ProductInfo:
             on_product_info(response.product, std::get<ProductInfoData>(response.data));
@@ -311,12 +341,13 @@ void OrderHandler::update_orders(const std::string& product) {
     pricer_.fetch_mid_price(state.l1, price_info);
     LOG_INFO(
         logger_,
-        "[Decision] {} bbid={} bask={} mid={} fair={} position_lots={} outstanding={}",
+        "[Decision] {} bbid={} bask={} mid={} fair={} position_lots={} outstanding={} balances=[{}]",
         product,
         to_double_price(price_info.bbid_price_in_min_ticks),
         to_double_price(price_info.bask_price_in_min_ticks),
         price_info.mid_price, price_info.fair_price,
-        state.position_in_lots, state.outstanding_orders.size()
+        state.position_in_lots, state.outstanding_orders.size(),
+        format_balances()
     );
     if (std::isnan(price_info.mid_price)) {
         LOG_INFO(logger_, "[Decision] {} skipped: mid price is NaN (no L1 yet)", product);

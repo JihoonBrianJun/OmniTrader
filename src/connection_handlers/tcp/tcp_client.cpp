@@ -285,6 +285,18 @@ void TcpClient::handle_message(const std::string& message) {
                 .product = position_msg.product,
                 .data = position_msg.position_data
             });
+        } else if (feed_classifier.feed == "balance") {
+            BalanceMsg balance_msg;
+            auto ec = glz::read_json(balance_msg, message);
+            if (ec) {
+                LOG_WARNING(logger_, "Failed to parse balance msg ({})", message);
+                return;
+            }
+            task_queue_->enqueue(Omni::Trader::TcpMarketDataResponse{
+                .feed = Omni::Trader::TcpMarketDataResponse::Balance,
+                .product = balance_msg.asset,
+                .data = balance_msg.balance_data
+            });
         } else if (feed_classifier.feed == "product_info") {
             ProductInfoMsg product_info_msg;
             auto ec = glz::read_json(product_info_msg, message);

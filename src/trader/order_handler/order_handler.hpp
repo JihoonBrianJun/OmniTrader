@@ -57,6 +57,10 @@ private:
     std::map<std::string, ProductState> product_states_;
     std::map<std::string, std::string> order_no_to_product_;
 
+    // Latest account balance per asset (e.g. "USDT", "USDC"), pushed by the
+    // listener. Logged each decision so margin-side issues are visible.
+    std::map<std::string, BalanceData> balances_;
+
     moodycamel::BlockingConcurrentQueue<Task> trader_queue_;
     std::unique_ptr<boost::asio::io_context> io_context_;
     std::thread io_thread_;
@@ -80,7 +84,9 @@ private:
     void on_orderbook(const std::string& product, const OrderbookData& data);
     void on_execution(const std::string& product, const ExecutionData& data);
     void on_position(const std::string& product, const PositionData& data);
+    void on_balance(const std::string& asset, const BalanceData& data);
     void on_product_info(const std::string& product, const ProductInfoData& data);
+    std::string format_balances() const;
     void update_orders(const std::string& product);
 };
 

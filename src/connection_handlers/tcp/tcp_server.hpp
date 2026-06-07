@@ -76,8 +76,16 @@ struct RetainMessage {
     std::string json_data;
 };
 
+// An account-level message (not tied to a product, e.g. asset balance): sent to
+// every connected session and retained per key so a new session gets the latest
+// on connect, regardless of which products it subscribes to.
+struct BroadcastAllMessage {
+    std::string key;
+    std::string json_data;
+};
+
 using ServerTask = std::variant<
-    SessionCommand, SubscriptionCommand, BroadcastMessage, RetainMessage
+    SessionCommand, SubscriptionCommand, BroadcastMessage, RetainMessage, BroadcastAllMessage
 >;
 
 class TcpServer {
@@ -97,6 +105,9 @@ class TcpServer {
         );
         // Set the retained message for a product (replayed to new subscribers).
         void set_retained(const std::string& product, const std::string& json_data);
+        // Send an account-level message to every session and retain it (by key) so
+        // future sessions receive the latest on connect.
+        void broadcast_to_all(const std::string& key, const std::string& json_data);
 
         void add_session(std::shared_ptr<TcpSession> session);
         void remove_session(std::shared_ptr<TcpSession> session);
@@ -115,6 +126,7 @@ class TcpServer {
         std::unordered_map<std::shared_ptr<TcpSession>, std::unordered_set<std::string>> session_to_products_;
         std::unordered_map<std::string, std::unordered_set<std::shared_ptr<TcpSession>>> product_to_sessions_;
         std::unordered_map<std::string, std::string> retained_;
+        std::unordered_map<std::string, std::string> account_retained_;
 
         moodycamel::BlockingConcurrentQueue<ServerTask> task_queue_;
         std::thread task_thread_;

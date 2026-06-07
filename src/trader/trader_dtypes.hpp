@@ -26,11 +26,12 @@ struct TcpMarketDataResponse {
         Trade,
         Execution,
         Position,
+        Balance,
         ProductInfo,
         Error
     } feed;
-    std::string product;
-    std::variant<OrderbookData, TradeData, ExecutionData, PositionData, ProductInfoData> data;
+    std::string product;   // for Balance this carries the asset (e.g. "USDC")
+    std::variant<OrderbookData, TradeData, ExecutionData, PositionData, BalanceData, ProductInfoData> data;
 };
 
 struct OrderUpdate {

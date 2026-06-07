@@ -34,6 +34,9 @@ class SnapshotFetcher {
         // Authoritative position snapshot (GET /fapi/v2/positionRisk).
         std::vector<Omni::PositionMsg> fetch_positions();
 
+        // Authoritative per-asset balance snapshot (GET /fapi/v2/balance).
+        std::vector<Omni::BalanceMsg> fetch_balances();
+
         // Open orders rebuilt as accept-style execution events (GET /fapi/v1/openOrders).
         std::vector<Omni::ExecutionMsg> fetch_open_orders();
 

@@ -104,6 +104,27 @@ std::vector<Omni::PositionMsg> SnapshotFetcher::fetch_positions() {
 }
 
 
+std::vector<Omni::BalanceMsg> SnapshotFetcher::fetch_balances() {
+    std::vector<Omni::BalanceMsg> balances;
+    auto body = signed_get("/fapi/v2/balance");
+    if (body.empty()) return balances;
+
+    try {
+        auto j = nlohmann::json::parse(body);
+        for (const auto& b : j) {
+            Omni::BalanceMsg msg;
+            msg.asset = b.at("asset").get<std::string>();
+            msg.balance_data.wallet_balance = std::stod(b.at("balance").get<std::string>());
+            msg.balance_data.available_balance = std::stod(b.at("availableBalance").get<std::string>());
+            balances.push_back(std::move(msg));
+        }
+    } catch (const std::exception& e) {
+        LOG_WARNING(logger_, "Failed to parse balance: {}", e.what());
+    }
+    return balances;
+}
+
+
 std::vector<Omni::ExecutionMsg> SnapshotFetcher::fetch_open_orders() {
     std::vector<Omni::ExecutionMsg> orders;
     auto body = signed_get("/fapi/v1/openOrders");

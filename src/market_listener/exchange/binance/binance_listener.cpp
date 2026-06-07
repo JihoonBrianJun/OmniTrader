@@ -258,6 +258,9 @@ void BinanceListener::on_user_open() {
     for (auto& msg : snapshot_fetcher_->fetch_positions()) {
         event_queue_->enqueue(std::move(msg));
     }
+    for (auto& msg : snapshot_fetcher_->fetch_balances()) {
+        event_queue_->enqueue(std::move(msg));
+    }
     for (auto& msg : snapshot_fetcher_->fetch_open_orders()) {
         event_queue_->enqueue(std::move(msg));
     }
@@ -375,14 +378,25 @@ void BinanceListener::handle_user_payload(const std::string& payload) {
             event_queue_->enqueue(std::move(msg));
         } else if (event_type == "ACCOUNT_UPDATE") {
             const auto& a = j.at("a");
-            if (!a.contains("P")) return;
-            for (const auto& p : a.at("P")) {
-                Omni::PositionMsg msg;
-                msg.product = p.at("s").get<std::string>();
-                msg.position_data.position_amt = sd(p, "pa");
-                msg.position_data.entry_price = sd(p, "ep");
-                msg.position_data.unrealized_pnl = sd(p, "up");
-                event_queue_->enqueue(std::move(msg));
+            if (a.contains("B")) {
+                for (const auto& b : a.at("B")) {
+                    Omni::BalanceMsg msg;
+                    msg.asset = b.at("a").get<std::string>();
+                    // Stream carries wallet balance ("wb") but not availableBalance;
+                    // the trader keeps the last snapshot's available until next snapshot.
+                    msg.balance_data.wallet_balance = sd(b, "wb");
+                    event_queue_->enqueue(std::move(msg));
+                }
+            }
+            if (a.contains("P")) {
+                for (const auto& p : a.at("P")) {
+                    Omni::PositionMsg msg;
+                    msg.product = p.at("s").get<std::string>();
+                    msg.position_data.position_amt = sd(p, "pa");
+                    msg.position_data.entry_price = sd(p, "ep");
+                    msg.position_data.unrealized_pnl = sd(p, "up");
+                    event_queue_->enqueue(std::move(msg));
+                }
             }
         }
     } catch (const std::exception& e) {
