@@ -43,7 +43,7 @@ void ProductManager::load() {
 
     try {
         auto j = nlohmann::json::parse(response.body);
-        for (const auto& sym : j.at("products")) {
+        for (const auto& sym : j.at("symbols")) {   // Binance wire key (do not rename)
             ProductFilter f;
             std::string product = sym.at("symbol").get<std::string>();
             for (const auto& filt : sym.at("filters")) {

@@ -24,7 +24,17 @@ int main(int argc, char* argv[]) {
     Omni::Trader::TraderConfig::set_parser(program);
     Omni::Trader::MarketConfig::set_parser(program);
     Omni::Trader::set_strategy_specific_parser(strategy_name, program);
-    program.parse_args(argc, argv);
+
+    try {
+        program.parse_args(argc, argv);
+    } catch (const std::exception& e) {
+        // A common cause is strategy-specific args (e.g. --spread_const_bp) with a
+        // --strategy_name that has no registered parser (note: names are
+        // case-sensitive, e.g. "Geuant").
+        std::cerr << "Error: " << e.what() << std::endl;
+        std::cerr << program;
+        return 1;
+    }
 
     Omni::Trader::TraderConfig config;
     config.init(program);
