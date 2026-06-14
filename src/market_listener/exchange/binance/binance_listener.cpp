@@ -386,6 +386,7 @@ void BinanceListener::handle_user_payload(const std::string& payload) {
             auto& d = msg.execution_data;
             d.update_position_on_fill = false;   // ACCOUNT_UPDATE is authoritative
             d.order_no = std::to_string(o.at("i").get<long>());
+            d.client_order_id = o.value("c", std::string{});   // cid for trader routing
             d.is_bid = (o.at("S").get<std::string>() == "BUY");
             d.order_price = sd(o, "p");
 

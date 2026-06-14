@@ -229,6 +229,7 @@ std::vector<Omni::ExecutionMsg> BinanceRestClient::fetch_open_orders() {
             msg.product = o.at("symbol").get<std::string>();
             auto& d = msg.execution_data;
             d.order_no = std::to_string(o.at("orderId").get<long>());
+            d.client_order_id = o.value("clientOrderId", std::string{});
             d.is_accept_data = true;
             d.is_place = true;
             d.is_accepted = true;

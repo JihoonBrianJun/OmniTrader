@@ -80,9 +80,9 @@ void BaseOrderGateway::get_balances(std::vector<std::string>& balance_responses)
 }
 
 
-void BaseOrderGateway::place_order(
-    const OG::OrderPlaceInfo& order_place_info, OG::OrderResponse& place_order_response
-) {
+// KIS REST is synchronous: run the HTTP call, then deliver the parsed response
+// (tagged with the order's cid) inline through the sink, matching the async contract.
+bool BaseOrderGateway::place_order(const OG::OrderPlaceInfo& order_place_info) {
     std::string order_place_params;
     write_order_place_params(order_place_params, order_place_info);
 
@@ -92,6 +92,8 @@ void BaseOrderGateway::place_order(
         order_place_info.is_bid ? bid_order_place_header_ : ask_order_place_header_
     );
 
+    OG::OrderResponse place_order_response;
+    place_order_response.cid = order_place_info.cid;
     if (response.success && (response.status_code == 200)) {
         parse_order_response(response.body, place_order_response);
     } else {
@@ -100,18 +102,20 @@ void BaseOrderGateway::place_order(
             response.error_msg, response.status_code, response.body
         );
     }
+    deliver(place_order_response);
+    return true;
 }
 
 
-void BaseOrderGateway::amend_order(
-    const OG::OrderAmendInfo& order_amend_info, OG::OrderResponse& amend_order_response
-) {
+bool BaseOrderGateway::amend_order(const OG::OrderAmendInfo& order_amend_info) {
     std::string order_amend_params;
     write_order_amend_params(order_amend_params, order_amend_info);
 
     auto client = std::make_shared<Omni::Connection::RestClient>(logger_);
     auto response = client->post(order_change_url_, order_amend_params, order_change_header_);
 
+    OG::OrderResponse amend_order_response;
+    amend_order_response.cid = order_amend_info.cid;
     if (response.success && (response.status_code == 200)) {
         parse_order_response(response.body, amend_order_response);
     } else {
@@ -120,18 +124,20 @@ void BaseOrderGateway::amend_order(
             response.error_msg, response.status_code, response.body
         );
     }
+    deliver(amend_order_response);
+    return true;
 }
 
 
-void BaseOrderGateway::cancel_order(
-    const OG::OrderCancelInfo& order_cancel_info, OG::OrderResponse& cancel_order_response
-) {
+bool BaseOrderGateway::cancel_order(const OG::OrderCancelInfo& order_cancel_info) {
     std::string order_cancel_params;
     write_order_cancel_params(order_cancel_params, order_cancel_info);
 
     auto client = std::make_shared<Omni::Connection::RestClient>(logger_);
     auto response = client->post(order_change_url_, order_cancel_params, order_change_header_);
 
+    OG::OrderResponse cancel_order_response;
+    cancel_order_response.cid = order_cancel_info.cid;
     if (response.success && (response.status_code == 200)) {
         parse_order_response(response.body, cancel_order_response);
     } else {
@@ -140,6 +146,8 @@ void BaseOrderGateway::cancel_order(
             response.error_msg, response.status_code, response.body
         );
     }
+    deliver(cancel_order_response);
+    return true;
 }
 
 

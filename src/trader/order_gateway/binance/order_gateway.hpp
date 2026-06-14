@@ -17,18 +17,13 @@ class BinanceOrderGateway : public Omni::OrderGateway::IOrderGateway {
     public:
         BinanceOrderGateway(const Omni::Trader::TraderConfig& config, quill::Logger* logger);
 
-        void place_order(
-            const Omni::OrderGateway::OrderPlaceInfo& info,
-            Omni::OrderGateway::OrderResponse& response
-        ) override;
-        void amend_order(
-            const Omni::OrderGateway::OrderAmendInfo& info,
-            Omni::OrderGateway::OrderResponse& response
-        ) override;
-        void cancel_order(
-            const Omni::OrderGateway::OrderCancelInfo& info,
-            Omni::OrderGateway::OrderResponse& response
-        ) override;
+        // Forwarded to both the WS and REST sub-gateways so either transport's reply
+        // reaches the same trader sink.
+        void set_response_sink(Omni::OrderGateway::IOrderGateway::ResponseSink sink) override;
+
+        bool place_order(const Omni::OrderGateway::OrderPlaceInfo& info) override;
+        bool amend_order(const Omni::OrderGateway::OrderAmendInfo& info) override;
+        bool cancel_order(const Omni::OrderGateway::OrderCancelInfo& info) override;
 
     private:
         quill::Logger* logger_;

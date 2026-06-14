@@ -33,39 +33,31 @@ BinanceOrderGateway::BinanceOrderGateway(
 }
 
 
-void BinanceOrderGateway::place_order(
-    const OG::OrderPlaceInfo& info, OG::OrderResponse& response
-) {
-    if (ws_usable()) {
-        ws_gateway_->place_order(info, response);
-        if (response.success) return;
-        LOG_WARNING(logger_, "WS place failed; falling back to REST");
-    }
-    rest_gateway_->place_order(info, response);
+void BinanceOrderGateway::set_response_sink(OG::IOrderGateway::ResponseSink sink) {
+    if (ws_gateway_) ws_gateway_->set_response_sink(sink);
+    if (rest_gateway_) rest_gateway_->set_response_sink(sink);
 }
 
 
-void BinanceOrderGateway::amend_order(
-    const OG::OrderAmendInfo& info, OG::OrderResponse& response
-) {
-    if (ws_usable()) {
-        ws_gateway_->amend_order(info, response);
-        if (response.success) return;
-        LOG_WARNING(logger_, "WS amend failed; falling back to REST");
-    }
-    rest_gateway_->amend_order(info, response);
+// Requests are fired without blocking; the outcome arrives later via the sink. The
+// WS gateway returns false only when it couldn't send (session down / send threw),
+// in which case we fall back to REST. A WS request that was sent but later rejected
+// by the exchange surfaces as a failed response on the sink (no REST retry).
+bool BinanceOrderGateway::place_order(const OG::OrderPlaceInfo& info) {
+    if (ws_usable() && ws_gateway_->place_order(info)) return true;
+    return rest_gateway_->place_order(info);
 }
 
 
-void BinanceOrderGateway::cancel_order(
-    const OG::OrderCancelInfo& info, OG::OrderResponse& response
-) {
-    if (ws_usable()) {
-        ws_gateway_->cancel_order(info, response);
-        if (response.success) return;
-        LOG_WARNING(logger_, "WS cancel failed; falling back to REST");
-    }
-    rest_gateway_->cancel_order(info, response);
+bool BinanceOrderGateway::amend_order(const OG::OrderAmendInfo& info) {
+    if (ws_usable() && ws_gateway_->amend_order(info)) return true;
+    return rest_gateway_->amend_order(info);
+}
+
+
+bool BinanceOrderGateway::cancel_order(const OG::OrderCancelInfo& info) {
+    if (ws_usable() && ws_gateway_->cancel_order(info)) return true;
+    return rest_gateway_->cancel_order(info);
 }
 
 } // namespace Omni::Binance

@@ -6,6 +6,7 @@
 #include <argparse/argparse.hpp>
 
 #include "common/market_msg_types.hpp"
+#include "trader/order_gateway/order_gateway_dtypes.hpp"
 
 namespace Omni::Trader {
 
@@ -37,8 +38,12 @@ struct OrderUpdate {
     std::string product;
 };
 
+// Async order-gateway reply (place/amend/cancel outcome), delivered from the
+// gateway's response sink and correlated back to the order by cid.
+using OrderResponseTask = Omni::OrderGateway::OrderResponse;
+
 using Task = std::variant<
-    TcpStatusUpdate, TcpSubscribeUpdate, TcpMarketDataResponse, OrderUpdate
+    TcpStatusUpdate, TcpSubscribeUpdate, TcpMarketDataResponse, OrderUpdate, OrderResponseTask
 >;
 
 // Wiring/config consumed by the order handler and the order-gateway factories.

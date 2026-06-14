@@ -30,7 +30,11 @@ struct ProductState {
     std::map<uint32_t, std::string> cid_to_order_no;
     std::map<std::string, uint32_t> order_no_to_cid;
     ResponseWaitingOrders response_waiting;
-    uint32_t next_cid = 1;
+    // When the response-waiting set became non-empty (ns). Used to time out a lost
+    // reply so the product doesn't stall. 0 when nothing is waiting. cids are now
+    // assigned by the OrderHandler (globally unique), so there is no per-product
+    // counter here.
+    int64_t response_waiting_since_ns = 0;
 };
 
 } // namespace Omni::Trader

@@ -23,9 +23,9 @@ class RestOrderGateway : public OG::IOrderGateway {
             std::shared_ptr<BinanceRestClient> rest_client
         );
 
-        void place_order(const OG::OrderPlaceInfo& info, OG::OrderResponse& response) override;
-        void amend_order(const OG::OrderAmendInfo& info, OG::OrderResponse& response) override;
-        void cancel_order(const OG::OrderCancelInfo& info, OG::OrderResponse& response) override;
+        bool place_order(const OG::OrderPlaceInfo& info) override;
+        bool amend_order(const OG::OrderAmendInfo& info) override;
+        bool cancel_order(const OG::OrderCancelInfo& info) override;
 
     private:
         quill::Logger* logger_;
@@ -34,9 +34,9 @@ class RestOrderGateway : public OG::IOrderGateway {
         std::shared_ptr<BinanceRestClient> rest_client_;
 
         // method: POST/PUT/DELETE; params: "k=v&..." without timestamp/signature.
-        void send_order(
-            const std::string& method, const std::string& params, OG::OrderResponse& response
-        );
+        // Runs the (blocking) HTTP call, then delivers the response (with cid) inline
+        // through the sink, mirroring the WS gateway's async contract.
+        void send_order(const std::string& method, const std::string& params, uint32_t cid);
 };
 
 } // namespace Omni::Binance

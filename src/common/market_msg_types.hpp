@@ -86,6 +86,7 @@ struct ExecutionData {
     std::string account_no = "";
     std::string order_no = "";
     std::string original_order_no = "";
+    std::string client_order_id = "";
     std::string short_product = "";
     std::string full_product = "";
     bool is_accept_data = false;   // an accept/ack/state-change (not a fill)

@@ -3,8 +3,6 @@
 #include <memory>
 #include <map>
 #include <atomic>
-#include <mutex>
-#include <condition_variable>
 #include <quill/Logger.h>
 
 #include "config_handlers/signer.hpp"
@@ -18,8 +16,11 @@ namespace Omni::Binance {
 namespace OG = Omni::OrderGateway;
 
 // Binance WS-API order gateway (wss://ws-fapi..., order.place/order.cancel).
-// Each request is HMAC-signed per the WS-API rules (params sorted ascending).
-// Requests block on a matching response id with a short timeout.
+// Each request is HMAC-signed per the WS-API rules (params sorted ascending) and
+// fired without blocking: the request id is set to the order's cid, so the reply
+// (parsed in on_message, success or error) is correlated back by cid and delivered
+// through the response sink. place/amend/cancel return false only when the request
+// could not be sent (session down / send threw), so the owner can fall back to REST.
 class WsOrderGateway : public OG::IOrderGateway {
     public:
         WsOrderGateway(
@@ -32,9 +33,9 @@ class WsOrderGateway : public OG::IOrderGateway {
 
         bool connected() const { return connected_.load(); }
 
-        void place_order(const OG::OrderPlaceInfo& info, OG::OrderResponse& response) override;
-        void amend_order(const OG::OrderAmendInfo& info, OG::OrderResponse& response) override;
-        void cancel_order(const OG::OrderCancelInfo& info, OG::OrderResponse& response) override;
+        bool place_order(const OG::OrderPlaceInfo& info) override;
+        bool amend_order(const OG::OrderAmendInfo& info) override;
+        bool cancel_order(const OG::OrderCancelInfo& info) override;
 
     private:
         quill::Logger* logger_;
@@ -44,18 +45,14 @@ class WsOrderGateway : public OG::IOrderGateway {
 
         std::unique_ptr<BinanceWebsocketClient> client_;
         std::atomic<bool> connected_;
-        std::atomic<unsigned long> request_counter_;
-
-        std::mutex mtx_;
-        std::condition_variable cv_;
-        std::map<std::string, OG::OrderResponse> results_;
-        std::map<std::string, bool> ready_;
 
         void on_message(const std::string& payload);
+        // Signs `params` and sends the request with id=cid (so the async reply is
+        // correlated by cid). Returns false if the request could not be sent.
         // params: ordered map (sorted by key) of request params without apiKey/
         // timestamp/recvWindow/signature, which are added here.
-        OG::OrderResponse send_request(
-            const std::string& method, std::map<std::string, std::string> params
+        bool send_request(
+            const std::string& method, std::map<std::string, std::string> params, uint32_t cid
         );
 };
 

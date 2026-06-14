@@ -25,10 +25,13 @@ RestOrderGateway::RestOrderGateway(
 
 
 void RestOrderGateway::send_order(
-    const std::string& method, const std::string& params, OG::OrderResponse& response
+    const std::string& method, const std::string& params, uint32_t cid
 ) {
+    OG::OrderResponse response;
+    response.cid = cid;
     if (!signer_) {
         LOG_WARNING(logger_, "No signer for Binance REST order");
+        deliver(response);
         return;
     }
     auto full_params = fmt::format(
@@ -49,6 +52,7 @@ void RestOrderGateway::send_order(
         );
         response.success = false;
         response.msg = http.body;
+        deliver(response);
         return;
     }
 
@@ -59,25 +63,27 @@ void RestOrderGateway::send_order(
     } catch (const std::exception& e) {
         LOG_WARNING(logger_, "Failed to parse Binance order response: {}", e.what());
     }
+    deliver(response);
 }
 
 
-void RestOrderGateway::place_order(const OG::OrderPlaceInfo& info, OG::OrderResponse& response) {
+bool RestOrderGateway::place_order(const OG::OrderPlaceInfo& info) {
     std::string params = fmt::format(
-        "symbol={}&side={}&type={}&quantity={}",
+        "symbol={}&side={}&type={}&quantity={}&newClientOrderId={}",
         info.product, info.is_bid ? "BUY" : "SELL", info.is_limit ? "LIMIT" : "MARKET",
-        rest_client_->format_qty(info.product, info.qty)
+        rest_client_->format_qty(info.product, info.qty), info.cid
     );
     if (info.is_limit) {
         params += fmt::format(
             "&timeInForce=GTC&price={}", rest_client_->format_price(info.product, info.price)
         );
     }
-    send_order("POST", params, response);
+    send_order("POST", params, info.cid);
+    return true;
 }
 
 
-void RestOrderGateway::amend_order(const OG::OrderAmendInfo& info, OG::OrderResponse& response) {
+bool RestOrderGateway::amend_order(const OG::OrderAmendInfo& info) {
     // Binance amend (PUT /fapi/v1/order) requires side, quantity and price.
     std::string params = fmt::format(
         "symbol={}&orderId={}&quantity={}&price={}",
@@ -85,13 +91,15 @@ void RestOrderGateway::amend_order(const OG::OrderAmendInfo& info, OG::OrderResp
         rest_client_->format_qty(info.product, info.qty),
         rest_client_->format_price(info.product, info.price)
     );
-    send_order("PUT", params, response);
+    send_order("PUT", params, info.cid);
+    return true;
 }
 
 
-void RestOrderGateway::cancel_order(const OG::OrderCancelInfo& info, OG::OrderResponse& response) {
+bool RestOrderGateway::cancel_order(const OG::OrderCancelInfo& info) {
     std::string params = fmt::format("symbol={}&orderId={}", info.product, info.order_no);
-    send_order("DELETE", params, response);
+    send_order("DELETE", params, info.cid);
+    return true;
 }
 
 } // namespace Omni::Binance

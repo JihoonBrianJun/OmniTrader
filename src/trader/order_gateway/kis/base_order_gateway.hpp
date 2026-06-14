@@ -21,9 +21,9 @@ class BaseOrderGateway : public OG::IOrderGateway {
 
         void get_balances(std::vector<std::string>& balance_responses);
 
-        void place_order(const OG::OrderPlaceInfo& info, OG::OrderResponse& response) override;
-        void amend_order(const OG::OrderAmendInfo& info, OG::OrderResponse& response) override;
-        void cancel_order(const OG::OrderCancelInfo& info, OG::OrderResponse& response) override;
+        bool place_order(const OG::OrderPlaceInfo& info) override;
+        bool amend_order(const OG::OrderAmendInfo& info) override;
+        bool cancel_order(const OG::OrderCancelInfo& info) override;
 
         virtual void parse_order_response(
             const std::string& order_response, OG::OrderResponse& parsed_response

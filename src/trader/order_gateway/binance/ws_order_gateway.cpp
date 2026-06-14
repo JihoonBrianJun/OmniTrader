@@ -1,4 +1,3 @@
-#include <chrono>
 #include <fmt/core.h>
 #include <quill/LogMacros.h>
 #include <nlohmann/json.hpp>
@@ -21,8 +20,7 @@ WsOrderGateway::WsOrderGateway(
     ws_api_domain_(ws_api_domain),
     signer_(std::move(signer)),
     rest_client_(std::move(rest_client)),
-    connected_(false),
-    request_counter_(0)
+    connected_(false)
 {
     auto status_cb = [this](bool /*connecting*/, bool opened) {
         connected_.store(opened);
@@ -40,44 +38,39 @@ WsOrderGateway::~WsOrderGateway() {
 
 
 void WsOrderGateway::on_message(const std::string& payload) {
+    // Parse the WS-API reply and hand it to the trader via the response sink. The
+    // request id was set to the order's cid, so both success and error replies
+    // correlate back by cid (the error arm carries no result, hence no orderId).
     try {
         auto j = nlohmann::json::parse(payload);
         if (!j.contains("id")) return;
-        std::string id = j.at("id").get<std::string>();
 
-        OG::OrderResponse resp;
+        OG::OrderResponse response;
+        response.cid = static_cast<uint32_t>(std::stoul(j.at("id").get<std::string>()));
+
         int status = j.value("status", 0);
         if (status == 200 && j.contains("result")) {
-            resp.success = true;
+            response.success = true;
             const auto& result = j.at("result");
             if (result.contains("orderId")) {
-                resp.order_no = std::to_string(result.at("orderId").get<long>());
+                response.order_no = std::to_string(result.at("orderId").get<long>());
             }
         } else {
-            resp.success = false;
-            if (j.contains("error")) resp.msg = j.at("error").dump();
+            response.success = false;
+            if (j.contains("error")) response.msg = j.at("error").dump();
         }
 
-        {
-            std::lock_guard<std::mutex> lk(mtx_);
-            results_[id] = resp;
-            ready_[id] = true;
-        }
-        cv_.notify_all();
+        deliver(response);
     } catch (const std::exception& e) {
         LOG_WARNING(logger_, "Failed to parse WS-API response: {}", e.what());
     }
 }
 
 
-OG::OrderResponse WsOrderGateway::send_request(
-    const std::string& method, std::map<std::string, std::string> params
+bool WsOrderGateway::send_request(
+    const std::string& method, std::map<std::string, std::string> params, uint32_t cid
 ) {
-    OG::OrderResponse response;
-    if (!connected_.load() || !signer_) {
-        response.success = false;
-        return response;
-    }
+    if (!connected_.load() || !signer_) return false;
 
     // WS-API signature: sign the alphabetically-sorted query string of all
     // params (apiKey/timestamp/recvWindow included). std::map is already sorted.
@@ -92,76 +85,55 @@ OG::OrderResponse WsOrderGateway::send_request(
     }
     params["signature"] = signer_->sign(query);
 
-    auto id = std::to_string(++request_counter_);
     nlohmann::json req;
-    req["id"] = id;
+    req["id"] = std::to_string(cid);   // reply correlates back by cid
     req["method"] = method;
-    req["params"] = params;   // all string values
+    req["params"] = params;            // all string values
     std::string payload = req.dump();
-
-    {
-        std::lock_guard<std::mutex> lk(mtx_);
-        results_[id] = OG::OrderResponse{};
-        ready_[id] = false;
-    }
 
     try {
         client_->send(client_->get_connection_hdl(), payload, websocketpp::frame::opcode::TEXT);
     } catch (const std::exception& e) {
         LOG_WARNING(logger_, "WS-API send failed: {}", e.what());
-        std::lock_guard<std::mutex> lk(mtx_);
-        results_.erase(id);
-        ready_.erase(id);
-        response.success = false;
-        return response;
+        return false;
     }
-
-    std::unique_lock<std::mutex> lk(mtx_);
-    bool got = cv_.wait_for(lk, std::chrono::seconds(3), [&] { return ready_[id]; });
-    if (got) {
-        response = results_[id];
-    } else {
-        LOG_WARNING(logger_, "WS-API request {} timed out", id);
-        response.success = false;
-    }
-    results_.erase(id);
-    ready_.erase(id);
-    return response;
+    return true;
 }
 
 
-void WsOrderGateway::place_order(const OG::OrderPlaceInfo& info, OG::OrderResponse& response) {
+bool WsOrderGateway::place_order(const OG::OrderPlaceInfo& info) {
     std::map<std::string, std::string> params{
         {"symbol", info.product},
         {"side", info.is_bid ? "BUY" : "SELL"},
         {"type", info.is_limit ? "LIMIT" : "MARKET"},
-        {"quantity", rest_client_->format_qty(info.product, info.qty)}
+        {"quantity", rest_client_->format_qty(info.product, info.qty)},
+        {"newClientOrderId", std::to_string(info.cid)}
     };
     if (info.is_limit) {
         params["timeInForce"] = "GTC";
         params["price"] = rest_client_->format_price(info.product, info.price);
     }
-    response = send_request("order.place", std::move(params));
+    return send_request("order.place", std::move(params), info.cid);
 }
 
 
-void WsOrderGateway::amend_order(const OG::OrderAmendInfo& info, OG::OrderResponse& response) {
+bool WsOrderGateway::amend_order(const OG::OrderAmendInfo& info) {
     std::map<std::string, std::string> params{
         {"symbol", info.product},
         {"orderId", info.order_no},
         {"quantity", rest_client_->format_qty(info.product, info.qty)},
         {"price", rest_client_->format_price(info.product, info.price)}
     };
-    response = send_request("order.modify", std::move(params));
+    return send_request("order.modify", std::move(params), info.cid);
 }
 
 
-void WsOrderGateway::cancel_order(const OG::OrderCancelInfo& info, OG::OrderResponse& response) {
+bool WsOrderGateway::cancel_order(const OG::OrderCancelInfo& info) {
     std::map<std::string, std::string> params{
         {"symbol", info.product},
         {"orderId", info.order_no}
     };
-    response = send_request("order.cancel", std::move(params));
+    return send_request("order.cancel", std::move(params), info.cid);
 }
 
 } // namespace Omni::Binance
