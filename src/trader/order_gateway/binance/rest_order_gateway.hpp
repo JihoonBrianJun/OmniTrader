@@ -36,7 +36,7 @@ class RestOrderGateway : public OG::IOrderGateway {
         // method: POST/PUT/DELETE; params: "k=v&..." without timestamp/signature.
         // Runs the (blocking) HTTP call, then delivers the response (with cid) inline
         // through the sink, mirroring the WS gateway's async contract.
-        void send_order(const std::string& method, const std::string& params, uint32_t cid);
+        void send_order(const std::string& method, const std::string& params, uint64_t cid);
 };
 
 } // namespace Omni::Binance

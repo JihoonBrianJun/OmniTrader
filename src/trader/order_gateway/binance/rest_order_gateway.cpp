@@ -25,7 +25,7 @@ RestOrderGateway::RestOrderGateway(
 
 
 void RestOrderGateway::send_order(
-    const std::string& method, const std::string& params, uint32_t cid
+    const std::string& method, const std::string& params, uint64_t cid
 ) {
     OG::OrderResponse response;
     response.cid = cid;

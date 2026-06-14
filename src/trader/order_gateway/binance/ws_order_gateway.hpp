@@ -52,7 +52,7 @@ class WsOrderGateway : public OG::IOrderGateway {
         // params: ordered map (sorted by key) of request params without apiKey/
         // timestamp/recvWindow/signature, which are added here.
         bool send_request(
-            const std::string& method, std::map<std::string, std::string> params, uint32_t cid
+            const std::string& method, std::map<std::string, std::string> params, uint64_t cid
         );
 };
 

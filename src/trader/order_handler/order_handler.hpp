@@ -58,12 +58,13 @@ private:
     std::map<std::string, ProductState> product_states_;
     std::map<std::string, std::string> order_no_to_product_;
 
-    // Globally-unique client order id (cid) generator and its product routing. cid
-    // is assigned before an order is sent, carried to the exchange as the client
-    // order id, and used to route the async order reply and execution updates back to
-    // the owning product/order. ProductState's per-order maps are keyed by this cid.
-    uint32_t next_cid_ = 1;
-    std::map<uint32_t, std::string> cid_to_product_;
+    // Globally-unique client order id (cid) and its product routing. cid is the
+    // send-time ns timestamp (monotonic, bumped on the rare same-ns tie so it never
+    // repeats), assigned before an order is sent, carried to the exchange as the
+    // client order id, and used to route the async order reply and execution updates
+    // back to the owning product/order. ProductState's per-order maps are keyed by it.
+    uint64_t last_cid_ = 0;
+    std::map<uint64_t, std::string> cid_to_product_;
 
     // A product stops issuing new decisions while it has orders awaiting a reply; if
     // a reply is lost this clears the wait so the product can't stall forever (a real
@@ -102,10 +103,11 @@ private:
     void on_order_response(const Omni::OrderGateway::OrderResponse& response);
     std::string format_positions() const;
 
-    // Reserve the next cid and record which product owns it.
-    uint32_t reserve_cid(const std::string& product);
+    // Reserve the next cid (send-time ns, made strictly increasing) and record which
+    // product owns it.
+    uint64_t reserve_cid(const std::string& product);
     // Drop an order (cid) and all of its index entries.
-    void forget_order(ProductState& state, uint32_t cid);
+    void forget_order(ProductState& state, uint64_t cid);
     void update_orders(const std::string& product);
 };
 

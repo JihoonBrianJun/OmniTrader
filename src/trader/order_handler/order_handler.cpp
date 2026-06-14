@@ -170,14 +170,16 @@ void OrderHandler::on_execution(const std::string& product, const ExecutionData&
     // Route by cid (the client order id we stamp on our orders); fall back to the
     // exchange order_no index for orders we didn't place this session (openOrders
     // snapshot, manual orders, or exchanges that don't echo our client id).
-    int64_t cid = -1;
+    bool have_cid = false;
+    uint64_t cid = 0;
     std::string target_product;
     if (!data.client_order_id.empty()) {
         try {
-            uint32_t parsed = static_cast<uint32_t>(std::stoul(data.client_order_id));
+            uint64_t parsed = std::stoull(data.client_order_id);
             auto cp = cid_to_product_.find(parsed);
             if (cp != cid_to_product_.end()) {
-                cid = static_cast<int64_t>(parsed);
+                cid = parsed;
+                have_cid = true;
                 target_product = cp->second;
             }
         } catch (const std::exception&) { /* not one of our cids */ }
@@ -189,14 +191,14 @@ void OrderHandler::on_execution(const std::string& product, const ExecutionData&
     if (target_product.empty()) return;
 
     auto& state = product_states_[target_product];
-    if (cid < 0) {
+    if (!have_cid) {
         auto it = state.order_no_to_cid.find(data.order_no);
-        if (it != state.order_no_to_cid.end()) cid = static_cast<int64_t>(it->second);
+        if (it != state.order_no_to_cid.end()) { cid = it->second; have_cid = true; }
     }
 
     // Bind cid <-> order_no (idempotent): the execution feed can confirm an order
     // before its async place reply arrives, and vice versa.
-    auto bind_order_no = [&](uint32_t c) {
+    auto bind_order_no = [&](uint64_t c) {
         if (data.order_no.empty()) return;
         state.cid_to_order_no[c] = data.order_no;
         state.order_no_to_cid[data.order_no] = c;
@@ -209,32 +211,32 @@ void OrderHandler::on_execution(const std::string& product, const ExecutionData&
     try {
         if (data.is_accept_data) {
             if (data.is_rejected) {
-                if (cid >= 0) {
+                if (have_cid) {
                     state.response_waiting.response_waiting_place_orders.erase(cid);
                     state.response_waiting.response_waiting_cancel_orders.erase(cid);
-                    forget_order(state, static_cast<uint32_t>(cid));
+                    forget_order(state, cid);
                     clear_waiting_if_idle();
                 }
                 return;
             }
 
             if (data.is_cancel) {
-                if (cid >= 0) {
+                if (have_cid) {
                     state.response_waiting.response_waiting_cancel_orders.erase(cid);
-                    forget_order(state, static_cast<uint32_t>(cid));
+                    forget_order(state, cid);
                     clear_waiting_if_idle();
                 }
                 return;
             }
 
             if (data.is_place && data.is_accepted) {
-                if (cid >= 0) {
-                    bind_order_no(static_cast<uint32_t>(cid));
+                if (have_cid) {
+                    bind_order_no(cid);
                     state.response_waiting.response_waiting_place_orders.erase(cid);
                     clear_waiting_if_idle();
                 } else if (data.order_qty.value_or(0.0) > 0) {
                     // Adopt an order we didn't place this session (e.g. openOrders snapshot).
-                    uint32_t new_cid = reserve_cid(target_product);
+                    uint64_t new_cid = reserve_cid(target_product);
                     state.outstanding_orders[new_cid] = OutstandingOrder{
                         .price_in_min_ticks = to_price_in_min_ticks(data.order_price.value_or(NAN)),
                         .qty_in_lots = to_qty_in_lots(data.order_qty.value_or(0.0)),
@@ -245,10 +247,10 @@ void OrderHandler::on_execution(const std::string& product, const ExecutionData&
             }
         } else if (data.is_executed && data.execute_qty.value_or(0.0) > 0) {
             auto exec_qty_in_lots = to_qty_in_lots(data.execute_qty.value_or(0.0));
-            if (cid >= 0) {
-                auto& order = state.outstanding_orders[static_cast<uint32_t>(cid)];
+            if (have_cid) {
+                auto& order = state.outstanding_orders[cid];
                 order.qty_in_lots -= exec_qty_in_lots;
-                if (order.qty_in_lots <= 0) forget_order(state, static_cast<uint32_t>(cid));
+                if (order.qty_in_lots <= 0) forget_order(state, cid);
             }
             if (data.update_position_on_fill) {
                 state.position_in_lots += data.is_bid ? exec_qty_in_lots : -exec_qty_in_lots;
@@ -265,14 +267,18 @@ void OrderHandler::on_execution(const std::string& product, const ExecutionData&
 }
 
 
-uint32_t OrderHandler::reserve_cid(const std::string& product) {
-    uint32_t cid = next_cid_++;
+uint64_t OrderHandler::reserve_cid(const std::string& product) {
+    // cid is the send-time ns timestamp, made strictly increasing so two orders that
+    // land on the same nanosecond (or a clock that didn't advance) never collide.
+    uint64_t cid = static_cast<uint64_t>(get_curr_tstamp_ns());
+    if (cid <= last_cid_) cid = last_cid_ + 1;
+    last_cid_ = cid;
     cid_to_product_[cid] = product;
     return cid;
 }
 
 
-void OrderHandler::forget_order(ProductState& state, uint32_t cid) {
+void OrderHandler::forget_order(ProductState& state, uint64_t cid) {
     auto on_it = state.cid_to_order_no.find(cid);
     if (on_it != state.cid_to_order_no.end()) {
         order_no_to_product_.erase(on_it->second);
@@ -456,7 +462,7 @@ void OrderHandler::update_orders(const std::string& product) {
     }
 
     std::map<int64_t, int32_t> bid_place_orders, ask_place_orders;
-    std::vector<uint32_t> bid_cancel_orders, ask_cancel_orders;
+    std::vector<uint64_t> bid_cancel_orders, ask_cancel_orders;
     strategy_->make_decision(
         price_info, false, state.position_in_lots, state.outstanding_orders,
         bid_place_orders, ask_place_orders, bid_cancel_orders, ask_cancel_orders
@@ -479,14 +485,14 @@ void OrderHandler::update_orders(const std::string& product) {
     // Mark a cid as awaiting a reply, stamping the wait start on the first one so the
     // timeout above has a reference point. Orders are fired without blocking; their
     // outcome arrives later via on_order_response (or the execution feed).
-    auto mark_waiting = [&](std::set<uint32_t>& waiting_set, uint32_t cid) {
+    auto mark_waiting = [&](std::set<uint64_t>& waiting_set, uint64_t cid) {
         if (state.response_waiting.no_waiting_orders()) {
             state.response_waiting_since_ns = get_curr_tstamp_ns();
         }
         waiting_set.insert(cid);
     };
 
-    auto submit_cancel = [&](uint32_t cid) {
+    auto submit_cancel = [&](uint64_t cid) {
         auto on_it = state.cid_to_order_no.find(cid);
         if (on_it == state.cid_to_order_no.end()) return;   // order_no not known yet
         Omni::OrderGateway::OrderCancelInfo info{
@@ -501,7 +507,7 @@ void OrderHandler::update_orders(const std::string& product) {
 
     auto submit_place = [&](bool is_bid, int64_t price_in_min_ticks, int32_t qty_in_lots) {
         if (qty_in_lots <= 0) return;
-        uint32_t cid = reserve_cid(product);
+        uint64_t cid = reserve_cid(product);
         // Register optimistically so the strategy won't re-issue the order while we
         // await the ack; the order_no is bound on the reply/execution, and the order
         // is dropped again if the place fails.

@@ -76,11 +76,11 @@ public:
         const PriceInfo& price_info,
         bool do_liquidate,
         int32_t position_in_lots,
-        const std::map<uint32_t, OutstandingOrder>& outstanding_orders,
+        const std::map<uint64_t, OutstandingOrder>& outstanding_orders,
         std::map<int64_t, int32_t>& bid_place_orders,
         std::map<int64_t, int32_t>& ask_place_orders,
-        std::vector<uint32_t>& bid_cancel_orders,
-        std::vector<uint32_t>& ask_cancel_orders
+        std::vector<uint64_t>& bid_cancel_orders,
+        std::vector<uint64_t>& ask_cancel_orders
     ) = 0;
 
 protected:

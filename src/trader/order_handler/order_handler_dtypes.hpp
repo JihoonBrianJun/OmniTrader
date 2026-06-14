@@ -12,8 +12,8 @@ namespace Omni::Trader {
 
 // Mirrors orderbook-backtest ResponseWaitingOrders.
 struct ResponseWaitingOrders {
-    std::set<uint32_t> response_waiting_place_orders;
-    std::set<uint32_t> response_waiting_cancel_orders;
+    std::set<uint64_t> response_waiting_place_orders;
+    std::set<uint64_t> response_waiting_cancel_orders;
 
     bool no_waiting_orders() const {
         return response_waiting_place_orders.empty()
@@ -26,9 +26,9 @@ struct ResponseWaitingOrders {
 struct ProductState {
     L1 l1;
     int32_t position_in_lots = 0;
-    std::map<uint32_t, OutstandingOrder> outstanding_orders;
-    std::map<uint32_t, std::string> cid_to_order_no;
-    std::map<std::string, uint32_t> order_no_to_cid;
+    std::map<uint64_t, OutstandingOrder> outstanding_orders;
+    std::map<uint64_t, std::string> cid_to_order_no;
+    std::map<std::string, uint64_t> order_no_to_cid;
     ResponseWaitingOrders response_waiting;
     // When the response-waiting set became non-empty (ns). Used to time out a lost
     // reply so the product doesn't stall. 0 when nothing is waiting. cids are now

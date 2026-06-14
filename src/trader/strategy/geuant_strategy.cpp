@@ -72,11 +72,11 @@ int32_t GeuantStrategy::get_order_qty_in_lots(
 
 
 void GeuantStrategy::choose_orders_to_cancel(
-    const std::map<uint32_t, OutstandingOrder>& outstanding_orders,
+    const std::map<uint64_t, OutstandingOrder>& outstanding_orders,
     std::map<int64_t, int32_t>& bid_place_orders,
     std::map<int64_t, int32_t>& ask_place_orders,
-    std::vector<uint32_t>& bid_cancel_orders,
-    std::vector<uint32_t>& ask_cancel_orders
+    std::vector<uint64_t>& bid_cancel_orders,
+    std::vector<uint64_t>& ask_cancel_orders
 ) {
     for (const auto& [cid, outstanding_order] : outstanding_orders) {
         auto& place_orders = outstanding_order.is_bid ? bid_place_orders : ask_place_orders;
@@ -96,11 +96,11 @@ void GeuantStrategy::make_decision(
     const PriceInfo& price_info,
     bool do_liquidate,
     int32_t position_in_lots,
-    const std::map<uint32_t, OutstandingOrder>& outstanding_orders,
+    const std::map<uint64_t, OutstandingOrder>& outstanding_orders,
     std::map<int64_t, int32_t>& bid_place_orders,
     std::map<int64_t, int32_t>& ask_place_orders,
-    std::vector<uint32_t>& bid_cancel_orders,
-    std::vector<uint32_t>& ask_cancel_orders
+    std::vector<uint64_t>& bid_cancel_orders,
+    std::vector<uint64_t>& ask_cancel_orders
 ) {
     if (std::isnan(price_info.mid_price)) return;
 

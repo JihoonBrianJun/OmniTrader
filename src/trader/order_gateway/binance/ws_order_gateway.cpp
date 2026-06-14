@@ -46,7 +46,7 @@ void WsOrderGateway::on_message(const std::string& payload) {
         if (!j.contains("id")) return;
 
         OG::OrderResponse response;
-        response.cid = static_cast<uint32_t>(std::stoul(j.at("id").get<std::string>()));
+        response.cid = std::stoull(j.at("id").get<std::string>());
 
         int status = j.value("status", 0);
         if (status == 200 && j.contains("result")) {
@@ -68,7 +68,7 @@ void WsOrderGateway::on_message(const std::string& payload) {
 
 
 bool WsOrderGateway::send_request(
-    const std::string& method, std::map<std::string, std::string> params, uint32_t cid
+    const std::string& method, std::map<std::string, std::string> params, uint64_t cid
 ) {
     if (!connected_.load() || !signer_) return false;
 
