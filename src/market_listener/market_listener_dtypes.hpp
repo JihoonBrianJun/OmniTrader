@@ -20,7 +20,7 @@ struct ListenerStatusUpdate {
 // these over TCP and (for market data) CSV-logs them.
 using ListenerEvent = std::variant<
     ListenerStatusUpdate, OrderbookMsg, TradeMsg, ExecutionMsg, PositionMsg,
-    BalanceMsg, ProductInfoMsg
+    ProductInfoMsg
 >;
 
 struct ListenerConfig {
@@ -29,7 +29,8 @@ struct ListenerConfig {
     std::string market_type = "derivatives";
     bool is_night = false;
     long timezone_minute_offset = 0;
-    std::vector<std::string> products = {"BTCUSDT"};
+    std::vector<std::string> products = {"BTCUSDT"};   // bare symbols (all categories)
+    std::vector<ProductSpec> product_specs = {{"BTCUSDT", Category::futures}};
     std::string products_db_base_path = "products";
     std::string orderbook_save_path = "orderbook_record";
     std::string trade_save_path = "trade_record";
@@ -72,7 +73,14 @@ struct ListenerConfig {
         is_night = program.get<bool>("--is_night");
         timezone_minute_offset = program.get<int64_t>("--timezone_minute_offset");
         market_end_intraday_minute = program.get<int64_t>("--market_end_intraday_minute");
-        products = program.get<std::vector<std::string>>("--products");
+        // Each --products token is SYMBOL[:category] (category defaults to futures).
+        products.clear();
+        product_specs.clear();
+        for (const auto& token : program.get<std::vector<std::string>>("--products")) {
+            auto spec = product_spec_from_token(token);
+            products.push_back(spec.product);
+            product_specs.push_back(spec);
+        }
         products_db_base_path = program.get<std::string>("--products_db_base_path");
         orderbook_save_path = program.get<std::string>("--orderbook_save_path");
         trade_save_path = program.get<std::string>("--trade_save_path");

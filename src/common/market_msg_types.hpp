@@ -1,8 +1,10 @@
 #pragma once
 #include <string>
+#include <string_view>
 #include <optional>
 #include <cmath>
 #include <vector>
+#include <glaze/glaze.hpp>
 
 // Normalized, exchange-agnostic message model shared across the listener, the
 // internal TCP link, and the trader. Each exchange adapter translates its native
@@ -10,10 +12,37 @@
 
 namespace Omni {
 
+// What kind of product a symbol refers to. Drives which exchange endpoint the
+// adapter uses (e.g. Binance: futures->positionRisk, asset->/fapi/v2/balance) and
+// is carried in the subscribe handshake. Each exchange uses the subset it supports.
+enum class Category { futures, spot, asset };
+
+// Parse a CLI/config token into a Category (defaults to futures for unknown input).
+inline Category category_from_string(std::string_view s) {
+    if (s == "spot") return Category::spot;
+    if (s == "asset") return Category::asset;
+    return Category::futures;
+}
+
+// A configured product together with its category. Shared by the listener (which
+// endpoints/streams to use) and the trader (what to put in its subscribe message).
+struct ProductSpec {
+    std::string product = "";
+    Category category = Category::futures;
+};
+
+// Parse a CLI/config token of form SYMBOL[:category] into a ProductSpec.
+inline ProductSpec product_spec_from_token(std::string_view token) {
+    auto pos = token.find(':');
+    if (pos == std::string_view::npos) return {std::string(token), Category::futures};
+    return {std::string(token.substr(0, pos)), category_from_string(token.substr(pos + 1))};
+}
+
 struct SubscribeRequestMsg {
     std::string feed = "subscribe";
     bool subscribe = false;
     std::string product = "";
+    Category category = Category::futures;
 };
 
 struct SubscribeResponseMsg {
@@ -21,6 +50,7 @@ struct SubscribeResponseMsg {
     bool subscribe = false;
     bool success = false;
     std::string product = "";
+    Category category = Category::futures;
 };
 
 struct OrderbookLevel {
@@ -79,32 +109,20 @@ struct ExecutionMsg {
     ExecutionData execution_data = {};
 };
 
-// Authoritative absolute position snapshot/update (Binance ACCOUNT_UPDATE +
-// positionRisk REST snapshot). position_amt is signed (long > 0, short < 0).
+// Unified position/balance snapshot/update, keyed by product. The meaning of
+// `balance` depends on the subscription's category: for futures it is the signed
+// position amount (long > 0, short < 0; Binance ACCOUNT_UPDATE + positionRisk); for
+// asset it is the wallet balance (Binance /fapi/v2/balance + ACCOUNT_UPDATE "B").
+// `available_balance` is what's free for new orders (asset snapshot only — the
+// stream update carries balance but not available).
 struct PositionData {
-    std::optional<double> position_amt = std::nullopt;
-    std::optional<double> entry_price = std::nullopt;
-    std::optional<double> unrealized_pnl = std::nullopt;
+    std::optional<double> balance = std::nullopt;
+    std::optional<double> available_balance = std::nullopt;
 };
 struct PositionMsg {
     std::string feed = "position";
     std::string product = "";
     PositionData position_data = {};
-};
-
-// Account-level asset balance (Binance: /fapi/v2/balance snapshot + ACCOUNT_UPDATE
-// "B" stream updates). Not tied to a product, so the listener routes it to every
-// connected trader regardless of subscription. wallet_balance is the total asset
-// balance; available_balance is what's free for new orders (snapshot only — the
-// stream update carries wallet balance but not available).
-struct BalanceData {
-    std::optional<double> wallet_balance = std::nullopt;
-    std::optional<double> available_balance = std::nullopt;
-};
-struct BalanceMsg {
-    std::string feed = "balance";
-    std::string asset = "";
-    BalanceData balance_data = {};
 };
 
 // Per-product trading parameters published by the listener (Binance: from
@@ -126,3 +144,10 @@ struct FeedClassifier {
 };
 
 } // namespace Omni
+
+// Serialize Category by name (e.g. "futures") over the wire rather than as an int.
+template <>
+struct glz::meta<Omni::Category> {
+    using enum Omni::Category;
+    static constexpr auto value = glz::enumerate(futures, spot, asset);
+};

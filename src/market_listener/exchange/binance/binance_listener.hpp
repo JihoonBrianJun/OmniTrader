@@ -48,7 +48,8 @@ class BinanceListener : public IExchangeListener {
         moodycamel::BlockingConcurrentQueue<ListenerEvent>* event_queue_;
 
         std::string rest_domain_, stream_domain_, domain_type_;
-        std::vector<std::string> products_;   // upper-case products from config
+        std::vector<std::string> futures_products_;   // market streams + order book + positionRisk
+        std::vector<std::string> asset_products_;     // /fapi/v2/balance only (no book/stream)
 
         std::shared_ptr<Omni::Config::ISigner> signer_;
         std::unique_ptr<OB::BinanceRestClient> rest_client_;

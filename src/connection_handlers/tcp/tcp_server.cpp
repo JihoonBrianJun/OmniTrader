@@ -130,9 +130,9 @@ void TcpSession::handle_message(const std::string& message) {
         }
 
         if (subscribe_request.subscribe) {
-            subscribe_to_product(subscribe_request.product);
+            subscribe_to_product(subscribe_request.product, subscribe_request.category);
         } else {
-            unsubscribe_from_product(subscribe_request.product);
+            unsubscribe_from_product(subscribe_request.product, subscribe_request.category);
         }
     } catch (const std::exception& e) {
         LOG_WARNING(logger_, "Error parsing client message: {}", e.what());
@@ -140,11 +140,11 @@ void TcpSession::handle_message(const std::string& message) {
 }
 
 
-void TcpSession::subscribe_to_product(const std::string& product) {
+void TcpSession::subscribe_to_product(const std::string& product, Category category) {
     server_->notify_subscribe(shared_from_this(), product);
 
     auto subscribe_response = SubscribeResponseMsg{
-        .subscribe = true, .success = true, .product = product
+        .subscribe = true, .success = true, .product = product, .category = category
     };
 
     std::string json_buffer;
@@ -157,11 +157,11 @@ void TcpSession::subscribe_to_product(const std::string& product) {
 }
 
 
-void TcpSession::unsubscribe_from_product(const std::string& product) {
+void TcpSession::unsubscribe_from_product(const std::string& product, Category category) {
     server_->notify_unsubscribe(shared_from_this(), product);
 
     auto unsubscribe_response = SubscribeResponseMsg{
-        .subscribe = false, .success = true, .product = product
+        .subscribe = false, .success = true, .product = product, .category = category
     };
 
     std::string json_buffer;
@@ -243,14 +243,6 @@ void TcpServer::set_product_info(
 }
 
 
-void TcpServer::broadcast_to_all(
-    const std::string& key, const std::string& json_data
-) {
-    if (!running_.load()) return;
-    task_queue_.enqueue(BroadcastAllMessage{key, json_data});
-}
-
-
 void TcpServer::add_session(std::shared_ptr<TcpSession> session) {
     task_queue_.enqueue(SessionCommand{
         SessionCommand::Type::ADD_SESSION, session
@@ -308,11 +300,6 @@ void TcpServer::broadcast_worker() {
                 switch (cmd.type) {
                     case SessionCommand::Type::ADD_SESSION: {
                         session_to_products_[cmd.session] = std::unordered_set<std::string>();
-                        // Replay account-level retained messages (e.g. balances) so
-                        // a new session has them immediately, before any subscribe.
-                        for (const auto& [key, json_data] : account_retained_) {
-                            cmd.session->send_message(json_data);
-                        }
                         break;
                     }
                     case SessionCommand::Type::REMOVE_SESSION: {
@@ -379,12 +366,6 @@ void TcpServer::broadcast_worker() {
             },
             [&](const ProductInfoUpdate& msg) {
                 product_infos_[msg.product] = msg.product_info_data;
-            },
-            [&](const BroadcastAllMessage& msg) {
-                account_retained_[msg.key] = msg.json_data;
-                for (auto& [session, products] : session_to_products_) {
-                    session->send_message(msg.json_data);
-                }
             }
         }, task);
     }

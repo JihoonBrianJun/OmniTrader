@@ -41,7 +41,7 @@ OrderHandler::OrderHandler(
     lot_size_(market_config.lot_size),
     strategy_(strategy),
     trade_products_(config.trade_products),
-    subscribe_products_(config.subscribe_same_products ? config.trade_products : config.subscribe_products),
+    subscribe_products_(config.subscribe_products),   // already includes the trade-product fallback
     broadcast_host_address_(config.broadcast_host_address),
     broadcast_port_(config.broadcast_port),
     order_update_interval_ns_(config.order_update_interval_ms * 1000000),
@@ -120,9 +120,9 @@ void OrderHandler::start_tcp_client() {
 
 void OrderHandler::on_tcp_status(const TcpStatusUpdate& response) {
     if (!tcp_connected_ && response.connected) {
-        for (const auto& product : subscribe_products_) {
-            tcp_client_->subscribe(product);
-            LOG_INFO(logger_, "Subscribed product {} on tcp server", product);
+        for (const auto& spec : subscribe_products_) {
+            tcp_client_->subscribe(spec.product, spec.category);
+            LOG_INFO(logger_, "Subscribed product {} on tcp server", spec.product);
         }
     } else if (tcp_connected_ && !response.connected) {
         tcp_client_->connect(broadcast_host_address_, broadcast_port_);
@@ -240,33 +240,33 @@ void OrderHandler::on_execution(const std::string& product, const ExecutionData&
 
 
 void OrderHandler::on_position(const std::string& product, const PositionData& data) {
-    if (!data.position_amt.has_value()) return;
-    product_states_[product].position_in_lots = to_qty_in_lots(data.position_amt.value());
-    LOG_INFO(logger_, "[Position] {} position={}", product, data.position_amt.value());
+    if (!data.balance.has_value()) return;
+
+    // Retain for visibility/logging (merge: an asset stream update carries balance
+    // but not available; keep the last known available until the next snapshot).
+    auto& pos = positions_[product];
+    pos.balance = data.balance;
+    if (data.available_balance.has_value()) pos.available_balance = data.available_balance;
+
+    // For a traded (futures) product, `balance` is the signed position amount that
+    // drives the strategy. Asset-category products have no product_states_ entry, so
+    // their balance is only retained above (no meaningless lot conversion).
+    auto it = product_states_.find(product);
+    if (it != product_states_.end()) {
+        it->second.position_in_lots = to_qty_in_lots(data.balance.value());
+    }
+    LOG_INFO(logger_, "[Position] {} balance={}", product, data.balance.value());
 }
 
 
-void OrderHandler::on_balance(const std::string& asset, const BalanceData& data) {
-    auto& bal = balances_[asset];
-    // Merge: stream updates carry wallet balance but not available; keep the last
-    // known available until the next snapshot refreshes it.
-    if (data.wallet_balance.has_value()) bal.wallet_balance = data.wallet_balance;
-    if (data.available_balance.has_value()) bal.available_balance = data.available_balance;
-    LOG_INFO(
-        logger_, "[Balance] {} wallet={} available={}",
-        asset, bal.wallet_balance.value_or(NAN), bal.available_balance.value_or(NAN)
-    );
-}
-
-
-std::string OrderHandler::format_balances() const {
-    if (balances_.empty()) return "(none)";
+std::string OrderHandler::format_positions() const {
+    if (positions_.empty()) return "(none)";
     std::string out;
-    for (const auto& [asset, bal] : balances_) {
+    for (const auto& [product, pos] : positions_) {
         if (!out.empty()) out += " ";
         out += fmt::format(
-            "{}(wallet={},avail={})",
-            asset, bal.wallet_balance.value_or(NAN), bal.available_balance.value_or(NAN)
+            "{}(balance={},avail={})",
+            product, pos.balance.value_or(NAN), pos.available_balance.value_or(NAN)
         );
     }
     return out;
@@ -300,9 +300,6 @@ void OrderHandler::process_market_data(const TcpMarketDataResponse& response) {
             break;
         case TcpMarketDataResponse::Feed::Position:
             on_position(response.product, std::get<PositionData>(response.data));
-            break;
-        case TcpMarketDataResponse::Feed::Balance:
-            on_balance(response.product, std::get<BalanceData>(response.data));
             break;
         case TcpMarketDataResponse::Feed::ProductInfo:
             on_product_info(response.product, std::get<ProductInfoData>(response.data));
@@ -341,13 +338,13 @@ void OrderHandler::update_orders(const std::string& product) {
     pricer_.fetch_mid_price(state.l1, price_info);
     LOG_INFO(
         logger_,
-        "[Decision] {} bbid={} bask={} mid={} fair={} position_lots={} outstanding={} balances=[{}]",
+        "[Decision] {} bbid={} bask={} mid={} fair={} position_lots={} outstanding={} positions=[{}]",
         product,
         to_double_price(price_info.bbid_price_in_min_ticks),
         to_double_price(price_info.bask_price_in_min_ticks),
         price_info.mid_price, price_info.fair_price,
         state.position_in_lots, state.outstanding_orders.size(),
-        format_balances()
+        format_positions()
     );
     if (std::isnan(price_info.mid_price)) {
         LOG_INFO(logger_, "[Decision] {} skipped: mid price is NaN (no L1 yet)", product);

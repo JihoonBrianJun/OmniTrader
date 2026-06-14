@@ -26,12 +26,11 @@ struct TcpMarketDataResponse {
         Trade,
         Execution,
         Position,
-        Balance,
         ProductInfo,
         Error
     } feed;
-    std::string product;   // for Balance this carries the asset (e.g. "USDC")
-    std::variant<OrderbookData, TradeData, ExecutionData, PositionData, BalanceData, ProductInfoData> data;
+    std::string product;   // for an asset position this carries the asset (e.g. "USDC")
+    std::variant<OrderbookData, TradeData, ExecutionData, PositionData, ProductInfoData> data;
 };
 
 struct OrderUpdate {
@@ -48,9 +47,9 @@ struct TraderConfig {
     std::string strategy_name = "Geuant";
     std::string region = "";
     std::string market_type = "derivatives";
-    std::vector<std::string> trade_products = {"BTCUSDT"};
+    std::vector<std::string> trade_products = {"BTCUSDT"};   // bare symbols (tradable, futures)
     bool subscribe_same_products = true;
-    std::vector<std::string> subscribe_products = {"BTCUSDT"};
+    std::vector<ProductSpec> subscribe_products = {{"BTCUSDT", Category::futures}};
     std::string broadcast_host_address = "0.0.0.0";
     unsigned short broadcast_port = 8888;
     std::string domain_type = "real";   // selects real vs test endpoints (REST + WS-API)
@@ -94,10 +93,26 @@ struct TraderConfig {
         strategy_name = program.get<std::string>("--strategy_name");
         region = program.get<std::string>("--region");
         market_type = program.get<std::string>("--market_type");
-        trade_products = program.get<std::vector<std::string>>("--trade_products");
-        subscribe_products = program.get<std::vector<std::string>>("--subscribe_products");
-        subscribe_same_products = subscribe_products.empty();
-        if (subscribe_same_products) subscribe_products = trade_products;
+        // Tokens are SYMBOL[:category] (category defaults to futures). trade_products
+        // keeps bare symbols; subscribe_products keeps (symbol, category) specs and
+        // falls back to the trade products (with their categories) when not given.
+        std::vector<ProductSpec> trade_specs;
+        trade_products.clear();
+        for (const auto& token : program.get<std::vector<std::string>>("--trade_products")) {
+            auto spec = product_spec_from_token(token);
+            trade_products.push_back(spec.product);
+            trade_specs.push_back(spec);
+        }
+        auto subscribe_tokens = program.get<std::vector<std::string>>("--subscribe_products");
+        subscribe_same_products = subscribe_tokens.empty();
+        subscribe_products.clear();
+        if (subscribe_same_products) {
+            subscribe_products = trade_specs;
+        } else {
+            for (const auto& token : subscribe_tokens) {
+                subscribe_products.push_back(product_spec_from_token(token));
+            }
+        }
         broadcast_host_address = program.get<std::string>("--broadcast_host_address");
         broadcast_port = static_cast<unsigned short>(program.get<int>("--broadcast_port"));
         domain_type = program.get<std::string>("--domain_type");

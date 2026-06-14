@@ -186,9 +186,7 @@ std::vector<Omni::PositionMsg> BinanceRestClient::fetch_positions() {
             if (amt == 0.0) continue;
             Omni::PositionMsg msg;
             msg.product = p.at("symbol").get<std::string>();
-            msg.position_data.position_amt = amt;
-            msg.position_data.entry_price = std::stod(p.at("entryPrice").get<std::string>());
-            msg.position_data.unrealized_pnl = std::stod(p.at("unRealizedProfit").get<std::string>());
+            msg.position_data.balance = amt;   // signed futures position amount
             positions.push_back(std::move(msg));
         }
     } catch (const std::exception& e) {
@@ -198,18 +196,18 @@ std::vector<Omni::PositionMsg> BinanceRestClient::fetch_positions() {
 }
 
 
-std::vector<Omni::BalanceMsg> BinanceRestClient::fetch_balances() {
-    std::vector<Omni::BalanceMsg> balances;
+std::vector<Omni::PositionMsg> BinanceRestClient::fetch_balances() {
+    std::vector<Omni::PositionMsg> balances;
     auto body = signed_get("/fapi/v2/balance");
     if (body.empty()) return balances;
 
     try {
         auto j = nlohmann::json::parse(body);
         for (const auto& b : j) {
-            Omni::BalanceMsg msg;
-            msg.asset = b.at("asset").get<std::string>();
-            msg.balance_data.wallet_balance = std::stod(b.at("balance").get<std::string>());
-            msg.balance_data.available_balance = std::stod(b.at("availableBalance").get<std::string>());
+            Omni::PositionMsg msg;
+            msg.product = b.at("asset").get<std::string>();   // asset symbol is the product key
+            msg.position_data.balance = std::stod(b.at("balance").get<std::string>());
+            msg.position_data.available_balance = std::stod(b.at("availableBalance").get<std::string>());
             balances.push_back(std::move(msg));
         }
     } catch (const std::exception& e) {

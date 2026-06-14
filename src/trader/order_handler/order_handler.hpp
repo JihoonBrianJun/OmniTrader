@@ -42,7 +42,8 @@ private:
     double min_tick_size_, lot_size_;
     std::shared_ptr<BaseStrategy> strategy_;
 
-    const std::vector<std::string> trade_products_, subscribe_products_;
+    const std::vector<std::string> trade_products_;
+    const std::vector<ProductSpec> subscribe_products_;
     const std::string broadcast_host_address_;
     unsigned short broadcast_port_;
     long order_update_interval_ns_;
@@ -57,9 +58,10 @@ private:
     std::map<std::string, ProductState> product_states_;
     std::map<std::string, std::string> order_no_to_product_;
 
-    // Latest account balance per asset (e.g. "USDT", "USDC"), pushed by the
-    // listener. Logged each decision so margin-side issues are visible.
-    std::map<std::string, BalanceData> balances_;
+    // Latest position/balance per product, pushed by the listener (futures position
+    // amount, or asset balance for asset-category products). Logged each decision so
+    // position/margin-side issues are visible.
+    std::map<std::string, PositionData> positions_;
 
     moodycamel::BlockingConcurrentQueue<Task> trader_queue_;
     std::unique_ptr<boost::asio::io_context> io_context_;
@@ -84,9 +86,8 @@ private:
     void on_orderbook(const std::string& product, const OrderbookData& data);
     void on_execution(const std::string& product, const ExecutionData& data);
     void on_position(const std::string& product, const PositionData& data);
-    void on_balance(const std::string& asset, const BalanceData& data);
     void on_product_info(const std::string& product, const ProductInfoData& data);
-    std::string format_balances() const;
+    std::string format_positions() const;
     void update_orders(const std::string& product);
 };
 

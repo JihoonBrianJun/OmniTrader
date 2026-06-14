@@ -158,19 +158,8 @@ void MarketListener::listen() {
             broadcast_market_data<ExecutionMsg>(msg);
         },
         [&](const PositionMsg& msg) {
+            // Covers both futures positions and asset balances
             broadcast_market_data<PositionMsg>(msg);
-        },
-        [&](const BalanceMsg& msg) {
-            // Account-level: send to every trader and retain per asset.
-            try {
-                std::string json_buffer;
-                if (!glz::write_json(msg, json_buffer)) {
-                    tcp_server_->broadcast_to_all(msg.asset, json_buffer);
-                    LOG_INFO(logger_, "{}", json_buffer);
-                }
-            } catch (const std::exception& e) {
-                LOG_WARNING(logger_, "Exception broadcasting balance: {}", e.what());
-            }
         },
         [&](const ProductInfoMsg& msg) {
             broadcast_market_data<ProductInfoMsg>(msg);

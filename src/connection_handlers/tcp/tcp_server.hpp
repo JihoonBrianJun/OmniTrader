@@ -36,8 +36,8 @@ class TcpSession : public std::enable_shared_from_this<TcpSession> {
         void do_read();
         void do_write();
         void handle_message(const std::string& message);
-        void subscribe_to_product(const std::string& product);
-        void unsubscribe_from_product(const std::string& product);
+        void subscribe_to_product(const std::string& product, Category category);
+        void unsubscribe_from_product(const std::string& product, Category category);
 
         boost::asio::ip::tcp::socket socket_;
         quill::Logger* logger_;
@@ -79,17 +79,8 @@ struct ProductInfoUpdate {
     ProductInfoData product_info_data;
 };
 
-// An account-level message (not tied to a product, e.g. asset balance): sent to
-// every connected session and retained per key so a new session gets the latest
-// on connect, regardless of which products it subscribes to.
-struct BroadcastAllMessage {
-    std::string key;
-    std::string json_data;
-};
-
 using ServerTask = std::variant<
-    SessionCommand, SubscriptionCommand, BroadcastMessage,
-    ProductInfoUpdate, BroadcastAllMessage
+    SessionCommand, SubscriptionCommand, BroadcastMessage, ProductInfoUpdate
 >;
 
 class TcpServer {
@@ -112,9 +103,6 @@ class TcpServer {
         // it (serialized on subscribe). Live updates to current subscribers go via
         // broadcast_to_subscribers like any feed.
         void set_product_info(const std::string& product, const ProductInfoData& data);
-        // Send an account-level message to every session and retain it (by key) so
-        // future sessions receive the latest on connect.
-        void broadcast_to_all(const std::string& key, const std::string& json_data);
 
         void add_session(std::shared_ptr<TcpSession> session);
         void remove_session(std::shared_ptr<TcpSession> session);
@@ -133,7 +121,6 @@ class TcpServer {
         std::unordered_map<std::shared_ptr<TcpSession>, std::unordered_set<std::string>> session_to_products_;
         std::unordered_map<std::string, std::unordered_set<std::shared_ptr<TcpSession>>> product_to_sessions_;
         std::map<std::string, ProductInfoData> product_infos_;
-        std::unordered_map<std::string, std::string> account_retained_;
 
         moodycamel::BlockingConcurrentQueue<ServerTask> task_queue_;
         std::thread task_thread_;

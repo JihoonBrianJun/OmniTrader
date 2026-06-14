@@ -28,8 +28,8 @@ class TcpClient {
         bool connect(const std::string& address, unsigned short port);
         void disconnect();
 
-        void subscribe(const std::string& product);
-        void unsubscribe(const std::string& product);
+        void subscribe(const std::string& product, Category category);
+        void unsubscribe(const std::string& product, Category category);
         void send_message(const std::string& message);
 
     private:

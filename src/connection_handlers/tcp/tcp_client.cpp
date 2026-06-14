@@ -79,14 +79,14 @@ void TcpClient::disconnect() {
 }
 
 
-void TcpClient::subscribe(const std::string& product) {
+void TcpClient::subscribe(const std::string& product, Category category) {
     if (!connected_.load()) {
         handle_error("Cannot subscribe: not connected to server");
         return;
     }
 
     auto subscribe_msg = SubscribeRequestMsg{
-        .subscribe = true, .product = product
+        .subscribe = true, .product = product, .category = category
     };
 
     std::string json_buffer;
@@ -99,14 +99,14 @@ void TcpClient::subscribe(const std::string& product) {
 }
 
 
-void TcpClient::unsubscribe(const std::string& product) {
+void TcpClient::unsubscribe(const std::string& product, Category category) {
     if (!connected_.load()) {
         handle_error("Cannot unsubscribe: not connected to server");
         return;
     }
 
     auto unsubscribe_msg = SubscribeRequestMsg{
-        .subscribe = false, .product = product
+        .subscribe = false, .product = product, .category = category
     };
 
     std::string json_buffer;
@@ -284,18 +284,6 @@ void TcpClient::handle_message(const std::string& message) {
                 .feed = Omni::Trader::TcpMarketDataResponse::Position,
                 .product = position_msg.product,
                 .data = position_msg.position_data
-            });
-        } else if (feed_classifier.feed == "balance") {
-            BalanceMsg balance_msg;
-            auto ec = glz::read_json(balance_msg, message);
-            if (ec) {
-                LOG_WARNING(logger_, "Failed to parse balance msg ({})", message);
-                return;
-            }
-            task_queue_->enqueue(Omni::Trader::TcpMarketDataResponse{
-                .feed = Omni::Trader::TcpMarketDataResponse::Balance,
-                .product = balance_msg.asset,
-                .data = balance_msg.balance_data
             });
         } else if (feed_classifier.feed == "product_info") {
             ProductInfoMsg product_info_msg;

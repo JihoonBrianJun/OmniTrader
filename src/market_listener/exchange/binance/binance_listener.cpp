@@ -35,7 +35,6 @@ BinanceListener::BinanceListener(
     config_(config),
     event_queue_(event_queue),
     domain_type_(config.domain_type),
-    products_(config.products),
     market_opened_(false),
     user_opened_(false),
     market_reconnect_cnt_(0),
@@ -49,8 +48,21 @@ BinanceListener::BinanceListener(
 
     rest_client_ = std::make_unique<OB::BinanceRestClient>(logger_, rest_domain_, signer_);
 
-    for (const auto& product : products_) {
-        order_books_[product] = OB::OrderBook{};
+    // Split configured products by category: futures get market streams + order
+    // books + positionRisk; asset gets balance only; spot is not implemented yet.
+    for (const auto& spec : config.product_specs) {
+        switch (spec.category) {
+            case Category::futures:
+                futures_products_.push_back(spec.product);
+                order_books_[spec.product] = OB::OrderBook{};
+                break;
+            case Category::asset:
+                asset_products_.push_back(spec.product);
+                break;
+            case Category::spot:
+                LOG_WARNING(logger_, "spot category not implemented yet; skipping {}", spec.product);
+                break;
+        }
     }
 }
 
@@ -62,7 +74,7 @@ BinanceListener::~BinanceListener() {
 
 std::string BinanceListener::market_stream_url() const {
     std::string streams;
-    for (const auto& product : products_) {
+    for (const auto& product : futures_products_) {
         auto s = to_lower(product);
         if (!streams.empty()) streams += "/";
         streams += fmt::format("{}@bookTicker/{}@depth@100ms/{}@aggTrade", s, s, s);
@@ -193,7 +205,7 @@ void BinanceListener::schedule_keepalive() {
 
 void BinanceListener::publish_product_info() {
     rest_client_->load();
-    for (const auto& product : products_) {
+    for (const auto& product : futures_products_) {
         auto f = rest_client_->filter(product);
         Omni::ProductInfoMsg msg;
         msg.product = product;
@@ -265,7 +277,7 @@ void BinanceListener::on_ws_status(const WsStatus& status) {
 void BinanceListener::on_market_open() {
     // (Re)bootstrap each order book from a REST snapshot; the diff stream then
     // keeps it in sequence.
-    for (const auto& product : products_) {
+    for (const auto& product : futures_products_) {
         resync_order_book(product);
     }
 }
@@ -273,12 +285,16 @@ void BinanceListener::on_market_open() {
 
 void BinanceListener::on_user_open() {
     // ACCOUNT_UPDATE/ORDER_TRADE_UPDATE only fire on change, so seed authoritative
-    // state from REST snapshots on every (re)connect.
-    for (auto& msg : rest_client_->fetch_positions()) {
-        event_queue_->enqueue(std::move(msg));
+    // state from REST snapshots on every (re)connect, per configured category.
+    if (!futures_products_.empty()) {
+        for (auto& msg : rest_client_->fetch_positions()) {   // positionRisk
+            event_queue_->enqueue(std::move(msg));
+        }
     }
-    for (auto& msg : rest_client_->fetch_balances()) {
-        event_queue_->enqueue(std::move(msg));
+    if (!asset_products_.empty()) {
+        for (auto& msg : rest_client_->fetch_balances()) {    // /fapi/v2/balance
+            event_queue_->enqueue(std::move(msg));
+        }
     }
     for (auto& msg : rest_client_->fetch_open_orders()) {
         event_queue_->enqueue(std::move(msg));
@@ -399,11 +415,11 @@ void BinanceListener::handle_user_payload(const std::string& payload) {
             const auto& a = j.at("a");
             if (a.contains("B")) {
                 for (const auto& b : a.at("B")) {
-                    Omni::BalanceMsg msg;
-                    msg.asset = b.at("a").get<std::string>();
+                    Omni::PositionMsg msg;
+                    msg.product = b.at("a").get<std::string>();   // asset symbol
                     // Stream carries wallet balance ("wb") but not availableBalance;
                     // the trader keeps the last snapshot's available until next snapshot.
-                    msg.balance_data.wallet_balance = sd(b, "wb");
+                    msg.position_data.balance = sd(b, "wb");
                     event_queue_->enqueue(std::move(msg));
                 }
             }
@@ -411,9 +427,7 @@ void BinanceListener::handle_user_payload(const std::string& payload) {
                 for (const auto& p : a.at("P")) {
                     Omni::PositionMsg msg;
                     msg.product = p.at("s").get<std::string>();
-                    msg.position_data.position_amt = sd(p, "pa");
-                    msg.position_data.entry_price = sd(p, "ep");
-                    msg.position_data.unrealized_pnl = sd(p, "up");
+                    msg.position_data.balance = sd(p, "pa");      // signed position amount
                     event_queue_->enqueue(std::move(msg));
                 }
             }
