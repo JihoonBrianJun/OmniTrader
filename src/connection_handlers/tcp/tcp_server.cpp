@@ -235,11 +235,11 @@ void TcpServer::broadcast_to_subscribers(
 }
 
 
-void TcpServer::set_retained(
-    const std::string& product, const std::string& json_data
+void TcpServer::set_product_info(
+    const std::string& product, const ProductInfoData& data
 ) {
     if (!running_.load()) return;
-    task_queue_.enqueue(RetainMessage{product, json_data});
+    task_queue_.enqueue(ProductInfoUpdate{product, data});
 }
 
 
@@ -338,15 +338,17 @@ void TcpServer::broadcast_worker() {
                     case SubscriptionCommand::Type::SUBSCRIBE_PRODUCT: {
                         session_to_products_[cmd.session].insert(cmd.product);
                         product_to_sessions_[cmd.product].insert(cmd.session);
-                        // Replay the retained message (e.g. product info) so a
-                        // late-joining subscriber gets it immediately.
-                        auto retained_it = retained_.find(cmd.product);
-                        LOG_INFO(
-                            logger_, "[Retain] SUBSCRIBE {} retained_size={} found={}",
-                            cmd.product, retained_.size(), retained_it != retained_.end()
-                        );
-                        if (retained_it != retained_.end()) {
-                            cmd.session->send_message(retained_it->second);
+                        // Serialize and send the retained product info (if any)
+                        auto info_it = product_infos_.find(cmd.product);
+                        if (info_it != product_infos_.end()) {
+                            auto product_info_msg = ProductInfoMsg{
+                                .product = cmd.product,
+                                .product_info_data = info_it->second
+                            };
+                            std::string json_buffer;
+                            if (!glz::write_json(product_info_msg, json_buffer)) {
+                                cmd.session->send_message(json_buffer);
+                            }
                         }
                         break;
                     }
@@ -375,12 +377,8 @@ void TcpServer::broadcast_worker() {
                     }
                 }
             },
-            [&](const RetainMessage& msg) {
-                retained_[msg.product] = msg.json_data;
-                LOG_INFO(
-                    logger_, "[Retain] STORE {} retained_size={}",
-                    msg.product, retained_.size()
-                );
+            [&](const ProductInfoUpdate& msg) {
+                product_infos_[msg.product] = msg.product_info_data;
             },
             [&](const BroadcastAllMessage& msg) {
                 account_retained_[msg.key] = msg.json_data;

@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <string>
+#include <map>
 #include <unordered_map>
 #include <unordered_set>
 #include <thread>
@@ -11,6 +12,8 @@
 #include <quill/Logger.h>
 #include <moodycamel/blockingconcurrentqueue.h>
 #include <boost/asio.hpp>
+
+#include "common/market_msg_types.hpp"
 
 
 namespace Omni::Connection {
@@ -69,11 +72,11 @@ struct BroadcastMessage {
     std::string json_data;
 };
 
-// A retained (last-value) message per product, replayed to each new subscriber
-// (used for product info so late-joining traders learn tick/lot immediately).
-struct RetainMessage {
+// Updates the server's retained last-value product info for a product. Applied on
+// the worker thread (like every other task) so product_infos_ needs no lock.
+struct ProductInfoUpdate {
     std::string product;
-    std::string json_data;
+    ProductInfoData product_info_data;
 };
 
 // An account-level message (not tied to a product, e.g. asset balance): sent to
@@ -85,7 +88,8 @@ struct BroadcastAllMessage {
 };
 
 using ServerTask = std::variant<
-    SessionCommand, SubscriptionCommand, BroadcastMessage, RetainMessage, BroadcastAllMessage
+    SessionCommand, SubscriptionCommand, BroadcastMessage,
+    ProductInfoUpdate, BroadcastAllMessage
 >;
 
 class TcpServer {
@@ -103,8 +107,11 @@ class TcpServer {
         void broadcast_to_subscribers(
             const std::string& product, const std::string& json_data
         );
-        // Set the retained message for a product (replayed to new subscribers).
-        void set_retained(const std::string& product, const std::string& json_data);
+        // Update the retained last-value product info for a product (enqueued and
+        // applied on the worker thread) so a session that subscribes later receives
+        // it (serialized on subscribe). Live updates to current subscribers go via
+        // broadcast_to_subscribers like any feed.
+        void set_product_info(const std::string& product, const ProductInfoData& data);
         // Send an account-level message to every session and retain it (by key) so
         // future sessions receive the latest on connect.
         void broadcast_to_all(const std::string& key, const std::string& json_data);
@@ -125,7 +132,7 @@ class TcpServer {
 
         std::unordered_map<std::shared_ptr<TcpSession>, std::unordered_set<std::string>> session_to_products_;
         std::unordered_map<std::string, std::unordered_set<std::shared_ptr<TcpSession>>> product_to_sessions_;
-        std::unordered_map<std::string, std::string> retained_;
+        std::map<std::string, ProductInfoData> product_infos_;
         std::unordered_map<std::string, std::string> account_retained_;
 
         moodycamel::BlockingConcurrentQueue<ServerTask> task_queue_;
