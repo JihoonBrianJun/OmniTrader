@@ -13,10 +13,9 @@
 
 #include "config_handlers/signer.hpp"
 #include "market_listener/exchange/exchange_listener.hpp"
-#include "market_listener/exchange/binance/binance_ws_client.hpp"
-#include "market_listener/exchange/binance/product_manager.hpp"
+#include "connection_handlers/websocket/binance/binance_ws_client.hpp"
+#include "connection_handlers/rest/binance/binance_rest_client.hpp"
 #include "market_listener/exchange/binance/order_book.hpp"
-#include "market_listener/exchange/binance/snapshot_fetcher.hpp"
 
 
 namespace Omni::Listener::Binance {
@@ -52,8 +51,7 @@ class BinanceListener : public IExchangeListener {
         std::vector<std::string> products_;   // upper-case products from config
 
         std::shared_ptr<Omni::Config::ISigner> signer_;
-        std::unique_ptr<OB::ProductManager> product_manager_;
-        std::unique_ptr<OB::SnapshotFetcher> snapshot_fetcher_;
+        std::unique_ptr<OB::BinanceRestClient> rest_client_;
 
         std::map<std::string, OB::OrderBook> order_books_;
 
@@ -66,6 +64,7 @@ class BinanceListener : public IExchangeListener {
         std::unique_ptr<boost::asio::io_context> io_context_;
         std::unique_ptr<boost::asio::steady_timer> market_reconnect_timer_, user_reconnect_timer_;
         std::unique_ptr<boost::asio::steady_timer> keepalive_timer_;
+        std::unique_ptr<boost::asio::steady_timer> product_info_timer_;
         std::thread io_thread_, worker_thread_;
         std::atomic<bool> running_;
 
@@ -75,6 +74,8 @@ class BinanceListener : public IExchangeListener {
         void schedule_market_reconnect();
         void schedule_user_reconnect();
         void schedule_keepalive();
+        void publish_product_info();
+        void schedule_product_info_refresh();
 
         void worker_loop();
         void on_ws_status(const WsStatus& status);

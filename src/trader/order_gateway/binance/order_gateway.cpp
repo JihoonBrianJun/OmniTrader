@@ -19,15 +19,15 @@ BinanceOrderGateway::BinanceOrderGateway(
     auto ws_api_domain = get_endpoint("ws_api", domain_type).second;
     auto signer = make_signer();
 
-    product_manager_ = std::make_shared<ProductManager>(logger_, rest_domain);
-    product_manager_->load();
+    rest_client_ = std::make_shared<BinanceRestClient>(logger_, rest_domain);
+    rest_client_->load();
 
     rest_gateway_ = std::make_unique<RestOrderGateway>(
-        logger_, rest_domain, signer, product_manager_
+        logger_, rest_domain, signer, rest_client_
     );
     if (signer && !ws_api_domain.empty()) {
         ws_gateway_ = std::make_unique<WsOrderGateway>(
-            logger_, ws_api_domain, signer, product_manager_
+            logger_, ws_api_domain, signer, rest_client_
         );
     }
 }

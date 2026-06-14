@@ -5,7 +5,7 @@
 #include <quill/LogMacros.h>
 
 #include "config_handlers/config_utils.hpp"
-#include "connection_handlers/http/http_client.hpp"
+#include "connection_handlers/rest/rest_client.hpp"
 #include "base_order_gateway.hpp"
 
 
@@ -64,7 +64,7 @@ void BaseOrderGateway::write_rest_header(
 
 void BaseOrderGateway::get_balances(std::vector<std::string>& balance_responses) {
     for (const auto& balance_params : balance_params_list_) {
-        auto client = std::make_shared<Omni::Connection::HttpClient>(logger_);
+        auto client = std::make_shared<Omni::Connection::RestClient>(logger_);
         auto response = client->post(balance_url_, balance_params, balance_header_);
 
         if (response.success && (response.status_code == 200)) {
@@ -86,7 +86,7 @@ void BaseOrderGateway::place_order(
     std::string order_place_params;
     write_order_place_params(order_place_params, order_place_info);
 
-    auto client = std::make_shared<Omni::Connection::HttpClient>(logger_);
+    auto client = std::make_shared<Omni::Connection::RestClient>(logger_);
     auto response = client->post(
         order_place_url_, order_place_params,
         order_place_info.is_bid ? bid_order_place_header_ : ask_order_place_header_
@@ -109,7 +109,7 @@ void BaseOrderGateway::amend_order(
     std::string order_amend_params;
     write_order_amend_params(order_amend_params, order_amend_info);
 
-    auto client = std::make_shared<Omni::Connection::HttpClient>(logger_);
+    auto client = std::make_shared<Omni::Connection::RestClient>(logger_);
     auto response = client->post(order_change_url_, order_amend_params, order_change_header_);
 
     if (response.success && (response.status_code == 200)) {
@@ -129,7 +129,7 @@ void BaseOrderGateway::cancel_order(
     std::string order_cancel_params;
     write_order_cancel_params(order_cancel_params, order_cancel_info);
 
-    auto client = std::make_shared<Omni::Connection::HttpClient>(logger_);
+    auto client = std::make_shared<Omni::Connection::RestClient>(logger_);
     auto response = client->post(order_change_url_, order_cancel_params, order_change_header_);
 
     if (response.success && (response.status_code == 200)) {

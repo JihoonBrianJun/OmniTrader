@@ -11,7 +11,7 @@
 
 #include "market_listener/exchange/exchange_listener.hpp"
 #include "market_listener/exchange/kis/product_manager_base.hpp"
-#include "market_listener/exchange/kis/kis_ws_client.hpp"
+#include "connection_handlers/websocket/kis/kis_ws_client.hpp"
 #include "market_listener/exchange/kis/kis_listener_dtypes.hpp"
 
 

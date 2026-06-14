@@ -7,7 +7,7 @@
 
 namespace Omni::Connection {
 
-struct HttpResponse {
+struct RestResponse {
     bool success;
     std::string error_msg = "";
     int status_code = 0;
@@ -15,26 +15,26 @@ struct HttpResponse {
     std::map<std::string, std::string> headers = {};
 };
 
-class HttpClient {
+class RestClient {
     public:
-        HttpClient(quill::Logger* logger);
-        ~HttpClient();
+        RestClient(quill::Logger* logger);
+        ~RestClient();
 
-        HttpResponse get(
+        RestResponse get(
             const std::string& url,
             const std::map<std::string, std::string>& headers = {}
         );
-        HttpResponse post(
-            const std::string& url,
-            const std::string& body,
-            const std::map<std::string, std::string>& headers = {}
-        );
-        HttpResponse put(
+        RestResponse post(
             const std::string& url,
             const std::string& body,
             const std::map<std::string, std::string>& headers = {}
         );
-        HttpResponse del(
+        RestResponse put(
+            const std::string& url,
+            const std::string& body,
+            const std::map<std::string, std::string>& headers = {}
+        );
+        RestResponse del(
             const std::string& url,
             const std::map<std::string, std::string>& headers = {}
         );
@@ -46,7 +46,7 @@ class HttpClient {
         quill::Logger* logger_;
         CURL* curl_;
 
-        HttpResponse perform(
+        RestResponse perform(
             const std::string& method,
             const std::string& url,
             const std::string* body,

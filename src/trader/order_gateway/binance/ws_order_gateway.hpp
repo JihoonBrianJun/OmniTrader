@@ -9,8 +9,8 @@
 
 #include "config_handlers/signer.hpp"
 #include "trader/order_gateway/order_gateway.hpp"
-#include "market_listener/exchange/binance/product_manager.hpp"
-#include "market_listener/exchange/binance/binance_ws_client.hpp"
+#include "connection_handlers/rest/binance/binance_rest_client.hpp"
+#include "connection_handlers/websocket/binance/binance_ws_client.hpp"
 
 
 namespace Omni::Binance {
@@ -26,7 +26,7 @@ class WsOrderGateway : public OG::IOrderGateway {
             quill::Logger* logger,
             const std::string& ws_api_domain,
             std::shared_ptr<Omni::Config::ISigner> signer,
-            std::shared_ptr<ProductManager> product_manager
+            std::shared_ptr<BinanceRestClient> rest_client
         );
         ~WsOrderGateway() override;
 
@@ -40,7 +40,7 @@ class WsOrderGateway : public OG::IOrderGateway {
         quill::Logger* logger_;
         std::string ws_api_domain_;
         std::shared_ptr<Omni::Config::ISigner> signer_;
-        std::shared_ptr<ProductManager> product_manager_;
+        std::shared_ptr<BinanceRestClient> rest_client_;
 
         std::unique_ptr<BinanceWebsocketClient> client_;
         std::atomic<bool> connected_;

@@ -1,16 +1,31 @@
+#include <cmath>
+#include <sstream>
+#include <iomanip>
 #include <fmt/core.h>
 #include <quill/LogMacros.h>
 #include <nlohmann/json.hpp>
 
 #include "utils/datetime.hpp"
-#include "connection_handlers/http/http_client.hpp"
+#include "connection_handlers/rest/rest_client.hpp"
 #include "market_listener/exchange/binance/binance_common.hpp"
-#include "snapshot_fetcher.hpp"
+#include "binance_rest_client.hpp"
 
 
 namespace Omni::Binance {
 
-SnapshotFetcher::SnapshotFetcher(
+static int precision_from_step(double step) {
+    if (step <= 0.0) return 8;
+    int p = 0;
+    double s = step;
+    while (s < 1.0 - 1e-12 && p < 12) {
+        s *= 10.0;
+        ++p;
+    }
+    return p;
+}
+
+
+BinanceRestClient::BinanceRestClient(
     quill::Logger* logger,
     const std::string& rest_domain,
     std::shared_ptr<Omni::Config::ISigner> signer
@@ -22,7 +37,7 @@ SnapshotFetcher::SnapshotFetcher(
 }
 
 
-std::string SnapshotFetcher::signed_get(const std::string& path, const std::string& extra_params) {
+std::string BinanceRestClient::signed_get(const std::string& path, const std::string& extra_params) {
     if (!signer_) {
         LOG_WARNING(logger_, "No signer configured for signed request {}", path);
         return "";
@@ -33,7 +48,7 @@ std::string SnapshotFetcher::signed_get(const std::string& path, const std::stri
     if (!extra_params.empty()) params = extra_params + "&" + params;
 
     auto url = fmt::format("{}{}?{}", rest_domain_, path, sign_query(*signer_, params));
-    auto client = std::make_shared<Omni::Connection::HttpClient>(logger_);
+    auto client = std::make_shared<Omni::Connection::RestClient>(logger_);
     auto response = client->get(url, auth_header(*signer_));
     if (!response.success || response.status_code != 200) {
         LOG_WARNING(
@@ -46,10 +61,89 @@ std::string SnapshotFetcher::signed_get(const std::string& path, const std::stri
 }
 
 
-DepthSnapshot SnapshotFetcher::fetch_depth(const std::string& product, int limit) {
+void BinanceRestClient::load() {
+    auto client = std::make_shared<Omni::Connection::RestClient>(logger_);
+    auto response = client->get(fmt::format("{}/fapi/v1/exchangeInfo", rest_domain_));
+    if (!response.success || response.status_code != 200) {
+        LOG_WARNING(
+            logger_, "Failed to load exchangeInfo: {} {} {}",
+            response.error_msg, response.status_code, response.body
+        );
+        return;
+    }
+
+    try {
+        auto j = nlohmann::json::parse(response.body);
+        std::map<std::string, ProductFilter> filters;
+        for (const auto& sym : j.at("symbols")) {   // Binance wire key (do not rename)
+            ProductFilter f;
+            std::string product = sym.at("symbol").get<std::string>();
+            for (const auto& filt : sym.at("filters")) {
+                auto type = filt.at("filterType").get<std::string>();
+                if (type == "PRICE_FILTER") {
+                    f.tick_size = std::stod(filt.at("tickSize").get<std::string>());
+                } else if (type == "LOT_SIZE") {
+                    f.step_size = std::stod(filt.at("stepSize").get<std::string>());
+                }
+            }
+            f.price_precision = precision_from_step(f.tick_size);
+            f.qty_precision = precision_from_step(f.step_size);
+            filters[product] = f;
+        }
+        filters_ = std::move(filters);
+        LOG_INFO(logger_, "Loaded {} Binance product filters", filters_.size());
+    } catch (const std::exception& e) {
+        LOG_WARNING(logger_, "Failed to parse exchangeInfo: {}", e.what());
+    }
+}
+
+
+bool BinanceRestClient::has(const std::string& product) const {
+    return filters_.find(product) != filters_.end();
+}
+
+
+ProductFilter BinanceRestClient::filter(const std::string& product) const {
+    auto it = filters_.find(product);
+    if (it != filters_.end()) return it->second;
+    return ProductFilter{};
+}
+
+
+double BinanceRestClient::round_price(const std::string& product, double price) const {
+    auto f = filter(product);
+    if (f.tick_size <= 0.0) return price;
+    return std::round(price / f.tick_size) * f.tick_size;
+}
+
+
+double BinanceRestClient::round_qty(const std::string& product, double qty) const {
+    auto f = filter(product);
+    if (f.step_size <= 0.0) return qty;
+    return std::floor(qty / f.step_size) * f.step_size;
+}
+
+
+std::string BinanceRestClient::format_price(const std::string& product, double price) const {
+    auto f = filter(product);
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(f.price_precision) << round_price(product, price);
+    return oss.str();
+}
+
+
+std::string BinanceRestClient::format_qty(const std::string& product, double qty) const {
+    auto f = filter(product);
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(f.qty_precision) << round_qty(product, qty);
+    return oss.str();
+}
+
+
+DepthSnapshot BinanceRestClient::fetch_depth(const std::string& product, int limit) {
     DepthSnapshot snapshot;
     auto url = fmt::format("{}/fapi/v1/depth?symbol={}&limit={}", rest_domain_, product, limit);
-    auto client = std::make_shared<Omni::Connection::HttpClient>(logger_);
+    auto client = std::make_shared<Omni::Connection::RestClient>(logger_);
     auto response = client->get(url);
     if (!response.success || response.status_code != 200) {
         LOG_WARNING(
@@ -80,7 +174,7 @@ DepthSnapshot SnapshotFetcher::fetch_depth(const std::string& product, int limit
 }
 
 
-std::vector<Omni::PositionMsg> SnapshotFetcher::fetch_positions() {
+std::vector<Omni::PositionMsg> BinanceRestClient::fetch_positions() {
     std::vector<Omni::PositionMsg> positions;
     auto body = signed_get("/fapi/v2/positionRisk");
     if (body.empty()) return positions;
@@ -104,7 +198,7 @@ std::vector<Omni::PositionMsg> SnapshotFetcher::fetch_positions() {
 }
 
 
-std::vector<Omni::BalanceMsg> SnapshotFetcher::fetch_balances() {
+std::vector<Omni::BalanceMsg> BinanceRestClient::fetch_balances() {
     std::vector<Omni::BalanceMsg> balances;
     auto body = signed_get("/fapi/v2/balance");
     if (body.empty()) return balances;
@@ -125,7 +219,7 @@ std::vector<Omni::BalanceMsg> SnapshotFetcher::fetch_balances() {
 }
 
 
-std::vector<Omni::ExecutionMsg> SnapshotFetcher::fetch_open_orders() {
+std::vector<Omni::ExecutionMsg> BinanceRestClient::fetch_open_orders() {
     std::vector<Omni::ExecutionMsg> orders;
     auto body = signed_get("/fapi/v1/openOrders");
     if (body.empty()) return orders;
@@ -154,10 +248,10 @@ std::vector<Omni::ExecutionMsg> SnapshotFetcher::fetch_open_orders() {
 }
 
 
-std::string SnapshotFetcher::create_listen_key() {
+std::string BinanceRestClient::create_listen_key() {
     if (!signer_) return "";
     auto url = fmt::format("{}/fapi/v1/listenKey", rest_domain_);
-    auto client = std::make_shared<Omni::Connection::HttpClient>(logger_);
+    auto client = std::make_shared<Omni::Connection::RestClient>(logger_);
     auto response = client->post(url, "", auth_header(*signer_));
     if (!response.success || response.status_code != 200) {
         LOG_WARNING(
@@ -176,10 +270,10 @@ std::string SnapshotFetcher::create_listen_key() {
 }
 
 
-void SnapshotFetcher::keepalive_listen_key() {
+void BinanceRestClient::keepalive_listen_key() {
     if (!signer_) return;
     auto url = fmt::format("{}/fapi/v1/listenKey", rest_domain_);
-    auto client = std::make_shared<Omni::Connection::HttpClient>(logger_);
+    auto client = std::make_shared<Omni::Connection::RestClient>(logger_);
     auto response = client->put(url, "", auth_header(*signer_));
     if (!response.success || response.status_code != 200) {
         LOG_WARNING(
@@ -190,10 +284,10 @@ void SnapshotFetcher::keepalive_listen_key() {
 }
 
 
-void SnapshotFetcher::close_listen_key() {
+void BinanceRestClient::close_listen_key() {
     if (!signer_) return;
     auto url = fmt::format("{}/fapi/v1/listenKey", rest_domain_);
-    auto client = std::make_shared<Omni::Connection::HttpClient>(logger_);
+    auto client = std::make_shared<Omni::Connection::RestClient>(logger_);
     client->del(url, auth_header(*signer_));
 }
 

@@ -3,7 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include "utils/datetime.hpp"
-#include "connection_handlers/http/http_client.hpp"
+#include "connection_handlers/rest/rest_client.hpp"
 #include "market_listener/exchange/binance/binance_common.hpp"
 #include "rest_order_gateway.hpp"
 
@@ -14,12 +14,12 @@ RestOrderGateway::RestOrderGateway(
     quill::Logger* logger,
     const std::string& rest_domain,
     std::shared_ptr<Omni::Config::ISigner> signer,
-    std::shared_ptr<ProductManager> product_manager
+    std::shared_ptr<BinanceRestClient> rest_client
 )
 :   logger_(logger),
     rest_domain_(rest_domain),
     signer_(std::move(signer)),
-    product_manager_(std::move(product_manager))
+    rest_client_(std::move(rest_client))
 {
 }
 
@@ -36,8 +36,8 @@ void RestOrderGateway::send_order(
     );
     auto url = fmt::format("{}/fapi/v1/order?{}", rest_domain_, sign_query(*signer_, full_params));
 
-    auto client = std::make_shared<Omni::Connection::HttpClient>(logger_);
-    Omni::Connection::HttpResponse http;
+    auto client = std::make_shared<Omni::Connection::RestClient>(logger_);
+    Omni::Connection::RestResponse http;
     if (method == "POST") http = client->post(url, "", auth_header(*signer_));
     else if (method == "PUT") http = client->put(url, "", auth_header(*signer_));
     else http = client->del(url, auth_header(*signer_));
@@ -66,11 +66,11 @@ void RestOrderGateway::place_order(const OG::OrderPlaceInfo& info, OG::OrderResp
     std::string params = fmt::format(
         "symbol={}&side={}&type={}&quantity={}",
         info.product, info.is_bid ? "BUY" : "SELL", info.is_limit ? "LIMIT" : "MARKET",
-        product_manager_->format_qty(info.product, info.qty)
+        rest_client_->format_qty(info.product, info.qty)
     );
     if (info.is_limit) {
         params += fmt::format(
-            "&timeInForce=GTC&price={}", product_manager_->format_price(info.product, info.price)
+            "&timeInForce=GTC&price={}", rest_client_->format_price(info.product, info.price)
         );
     }
     send_order("POST", params, response);
@@ -82,8 +82,8 @@ void RestOrderGateway::amend_order(const OG::OrderAmendInfo& info, OG::OrderResp
     std::string params = fmt::format(
         "symbol={}&orderId={}&quantity={}&price={}",
         info.product, info.order_no,
-        product_manager_->format_qty(info.product, info.qty),
-        product_manager_->format_price(info.product, info.price)
+        rest_client_->format_qty(info.product, info.qty),
+        rest_client_->format_price(info.product, info.price)
     );
     send_order("PUT", params, response);
 }

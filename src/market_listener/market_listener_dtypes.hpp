@@ -37,6 +37,7 @@ struct ListenerConfig {
     unsigned short broadcast_port = 8888;
     std::string domain_type = "real";    // selects real vs test endpoints
     int orderbook_levels = 20;           // top-N levels to broadcast
+    long product_info_refresh_sec = 300; // re-fetch/publish product info every N s (<=0 disables)
 
     // Loop-control / logging (not consumed by the adapters but owned here so the
     // whole listener configuration is registered and populated in one place).
@@ -57,6 +58,7 @@ struct ListenerConfig {
         program.add_argument("--orderbook_save_path").default_value(std::string("orderbook_record"));
         program.add_argument("--trade_save_path").default_value(std::string("trade_record"));
         program.add_argument("--orderbook_levels").scan<'i', int>().default_value(20);
+        program.add_argument("--product_info_refresh_sec").scan<'i', int64_t>().default_value(int64_t{300});
         program.add_argument("--broadcast_host_address").default_value(std::string("0.0.0.0"));
         program.add_argument("--broadcast_port").scan<'i', int>().default_value(8888);
         program.add_argument("--domain_type").default_value(std::string("real"));
@@ -75,6 +77,7 @@ struct ListenerConfig {
         orderbook_save_path = program.get<std::string>("--orderbook_save_path");
         trade_save_path = program.get<std::string>("--trade_save_path");
         orderbook_levels = program.get<int>("--orderbook_levels");
+        product_info_refresh_sec = program.get<int64_t>("--product_info_refresh_sec");
         broadcast_host_address = program.get<std::string>("--broadcast_host_address");
         broadcast_port = static_cast<unsigned short>(program.get<int>("--broadcast_port"));
         domain_type = program.get<std::string>("--domain_type");

@@ -15,12 +15,12 @@ WsOrderGateway::WsOrderGateway(
     quill::Logger* logger,
     const std::string& ws_api_domain,
     std::shared_ptr<Omni::Config::ISigner> signer,
-    std::shared_ptr<ProductManager> product_manager
+    std::shared_ptr<BinanceRestClient> rest_client
 )
 :   logger_(logger),
     ws_api_domain_(ws_api_domain),
     signer_(std::move(signer)),
-    product_manager_(std::move(product_manager)),
+    rest_client_(std::move(rest_client)),
     connected_(false),
     request_counter_(0)
 {
@@ -135,11 +135,11 @@ void WsOrderGateway::place_order(const OG::OrderPlaceInfo& info, OG::OrderRespon
         {"symbol", info.product},
         {"side", info.is_bid ? "BUY" : "SELL"},
         {"type", info.is_limit ? "LIMIT" : "MARKET"},
-        {"quantity", product_manager_->format_qty(info.product, info.qty)}
+        {"quantity", rest_client_->format_qty(info.product, info.qty)}
     };
     if (info.is_limit) {
         params["timeInForce"] = "GTC";
-        params["price"] = product_manager_->format_price(info.product, info.price);
+        params["price"] = rest_client_->format_price(info.product, info.price);
     }
     response = send_request("order.place", std::move(params));
 }
@@ -149,8 +149,8 @@ void WsOrderGateway::amend_order(const OG::OrderAmendInfo& info, OG::OrderRespon
     std::map<std::string, std::string> params{
         {"symbol", info.product},
         {"orderId", info.order_no},
-        {"quantity", product_manager_->format_qty(info.product, info.qty)},
-        {"price", product_manager_->format_price(info.product, info.price)}
+        {"quantity", rest_client_->format_qty(info.product, info.qty)},
+        {"price", rest_client_->format_price(info.product, info.price)}
     };
     response = send_request("order.modify", std::move(params));
 }

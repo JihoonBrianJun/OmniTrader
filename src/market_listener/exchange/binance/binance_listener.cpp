@@ -47,8 +47,7 @@ BinanceListener::BinanceListener(
     stream_domain_ = OB::get_endpoint("ws_stream", domain_type_).second;
     signer_ = OB::make_signer();
 
-    product_manager_ = std::make_unique<OB::ProductManager>(logger_, rest_domain_);
-    snapshot_fetcher_ = std::make_unique<OB::SnapshotFetcher>(logger_, rest_domain_, signer_);
+    rest_client_ = std::make_unique<OB::BinanceRestClient>(logger_, rest_domain_, signer_);
 
     for (const auto& product : products_) {
         order_books_[product] = OB::OrderBook{};
@@ -86,7 +85,7 @@ void BinanceListener::create_market_client() {
 
 
 void BinanceListener::create_user_client() {
-    listen_key_ = snapshot_fetcher_->create_listen_key();
+    listen_key_ = rest_client_->create_listen_key();
     if (listen_key_.empty()) {
         LOG_WARNING(logger_, "Could not obtain listenKey; user stream disabled");
         return;
@@ -106,18 +105,10 @@ void BinanceListener::create_user_client() {
 void BinanceListener::start() {
     running_.store(true);
 
-    product_manager_->load();
-
-    // Publish per-product trading parameters (tick/lot from exchangeInfo) so the
-    // trader can use them instead of CLI-provided values.
-    for (const auto& product : products_) {
-        auto f = product_manager_->filter(product);
-        Omni::ProductInfoMsg msg;
-        msg.product = product;
-        msg.product_info_data.min_tick_size = f.tick_size;
-        msg.product_info_data.lot_size = f.step_size;
-        event_queue_->enqueue(std::move(msg));
-    }
+    // Load exchangeInfo and publish per-product trading parameters (tick/lot) so
+    // the trader can use them instead of CLI-provided values. Refreshed
+    // periodically (see schedule_product_info_refresh) since filters can change.
+    publish_product_info();
 
     io_thread_ = std::thread([this]() {
         auto work_guard = boost::asio::make_work_guard(*io_context_);
@@ -130,6 +121,7 @@ void BinanceListener::start() {
 
     worker_thread_ = std::thread([this]() { worker_loop(); });
 
+    schedule_product_info_refresh();
     create_market_client();
     if (signer_) {
         create_user_client();
@@ -151,8 +143,8 @@ void BinanceListener::stop() {
 
     market_client_.reset();
     user_client_.reset();
-    if (!listen_key_.empty() && snapshot_fetcher_) {
-        snapshot_fetcher_->close_listen_key();
+    if (!listen_key_.empty() && rest_client_) {
+        rest_client_->close_listen_key();
     }
 }
 
@@ -192,8 +184,35 @@ void BinanceListener::schedule_keepalive() {
     keepalive_timer_->expires_after(std::chrono::minutes(30));
     keepalive_timer_->async_wait([this](const boost::system::error_code ec) {
         if (!ec && running_.load()) {
-            if (!listen_key_.empty()) snapshot_fetcher_->keepalive_listen_key();
+            if (!listen_key_.empty()) rest_client_->keepalive_listen_key();
             schedule_keepalive();
+        }
+    });
+}
+
+
+void BinanceListener::publish_product_info() {
+    rest_client_->load();
+    for (const auto& product : products_) {
+        auto f = rest_client_->filter(product);
+        Omni::ProductInfoMsg msg;
+        msg.product = product;
+        msg.product_info_data.min_tick_size = f.tick_size;
+        msg.product_info_data.lot_size = f.step_size;
+        event_queue_->enqueue(std::move(msg));
+    }
+}
+
+
+void BinanceListener::schedule_product_info_refresh() {
+    // <= 0 disables periodic refresh (product info still published once at start).
+    if (config_.product_info_refresh_sec <= 0) return;
+    product_info_timer_ = std::make_unique<boost::asio::steady_timer>(*io_context_);
+    product_info_timer_->expires_after(std::chrono::seconds(config_.product_info_refresh_sec));
+    product_info_timer_->async_wait([this](const boost::system::error_code ec) {
+        if (!ec && running_.load()) {
+            publish_product_info();
+            schedule_product_info_refresh();
         }
     });
 }
@@ -255,13 +274,13 @@ void BinanceListener::on_market_open() {
 void BinanceListener::on_user_open() {
     // ACCOUNT_UPDATE/ORDER_TRADE_UPDATE only fire on change, so seed authoritative
     // state from REST snapshots on every (re)connect.
-    for (auto& msg : snapshot_fetcher_->fetch_positions()) {
+    for (auto& msg : rest_client_->fetch_positions()) {
         event_queue_->enqueue(std::move(msg));
     }
-    for (auto& msg : snapshot_fetcher_->fetch_balances()) {
+    for (auto& msg : rest_client_->fetch_balances()) {
         event_queue_->enqueue(std::move(msg));
     }
-    for (auto& msg : snapshot_fetcher_->fetch_open_orders()) {
+    for (auto& msg : rest_client_->fetch_open_orders()) {
         event_queue_->enqueue(std::move(msg));
     }
 }
@@ -270,7 +289,7 @@ void BinanceListener::on_user_open() {
 void BinanceListener::resync_order_book(const std::string& product) {
     auto& book = order_books_[product];
     book.mark_desynced();
-    auto snapshot = snapshot_fetcher_->fetch_depth(product);
+    auto snapshot = rest_client_->fetch_depth(product);
     if (!snapshot.ok) {
         LOG_WARNING(logger_, "Depth snapshot failed for {}; will retry on next diff", product);
         return;

@@ -1,10 +1,10 @@
 #include <cctype>
 #include <quill/LogMacros.h>
-#include "http_client.hpp"
+#include "rest_client.hpp"
 
 namespace Omni::Connection {
 
-HttpClient::HttpClient(quill::Logger* logger)
+RestClient::RestClient(quill::Logger* logger)
 :   logger_(logger),
     curl_(nullptr)
 {
@@ -16,7 +16,7 @@ HttpClient::HttpClient(quill::Logger* logger)
 }
 
 
-HttpClient::~HttpClient() {
+RestClient::~RestClient() {
     if (curl_) {
         curl_easy_cleanup(curl_);
     }
@@ -24,7 +24,7 @@ HttpClient::~HttpClient() {
 }
 
 
-size_t HttpClient::write_callback(
+size_t RestClient::write_callback(
     void* contents, size_t size, size_t nmemb, std::string* data
 ) {
     size_t total_size = size * nmemb;
@@ -33,7 +33,7 @@ size_t HttpClient::write_callback(
 }
 
 
-size_t HttpClient::header_callback(
+size_t RestClient::header_callback(
     void* contents, size_t size, size_t nmemb,
     std::map<std::string, std::string>* headers
 ) {
@@ -59,7 +59,7 @@ size_t HttpClient::header_callback(
 }
 
 
-std::string HttpClient::url_encode(const std::string& value) {
+std::string RestClient::url_encode(const std::string& value) {
     static const char hex[] = "0123456789ABCDEF";
     std::string out;
     out.reserve(value.size() * 3);
@@ -76,14 +76,14 @@ std::string HttpClient::url_encode(const std::string& value) {
 }
 
 
-HttpResponse HttpClient::perform(
+RestResponse RestClient::perform(
     const std::string& method,
     const std::string& url,
     const std::string* body,
     const std::map<std::string, std::string>& headers
 ) {
     if (!curl_) {
-        return HttpResponse{false, "CURL not initialized"};
+        return RestResponse{false, "CURL not initialized"};
     }
 
     std::string response_body;
@@ -131,31 +131,31 @@ HttpResponse HttpClient::perform(
 
         if (res != CURLE_OK) {
             auto curl_error_msg = std::string(curl_easy_strerror(res));
-            return HttpResponse{false, "CURL request failed: " + curl_error_msg};
+            return RestResponse{false, "CURL request failed: " + curl_error_msg};
         }
 
         curl_easy_getinfo(curl_, CURLINFO_RESPONSE_CODE, &status_code);
 
-        return HttpResponse{
+        return RestResponse{
             true, "",
             static_cast<int>(status_code),
             response_body,
             response_headers
         };
     } catch (const std::exception& e) {
-        return HttpResponse{false, "HTTP request failed: " + std::string(e.what())};
+        return RestResponse{false, "HTTP request failed: " + std::string(e.what())};
     }
 }
 
 
-HttpResponse HttpClient::get(
+RestResponse RestClient::get(
     const std::string& url, const std::map<std::string, std::string>& headers
 ) {
     return perform("GET", url, nullptr, headers);
 }
 
 
-HttpResponse HttpClient::post(
+RestResponse RestClient::post(
     const std::string& url, const std::string& body,
     const std::map<std::string, std::string>& headers
 ) {
@@ -167,7 +167,7 @@ HttpResponse HttpClient::post(
 }
 
 
-HttpResponse HttpClient::put(
+RestResponse RestClient::put(
     const std::string& url, const std::string& body,
     const std::map<std::string, std::string>& headers
 ) {
@@ -175,7 +175,7 @@ HttpResponse HttpClient::put(
 }
 
 
-HttpResponse HttpClient::del(
+RestResponse RestClient::del(
     const std::string& url, const std::map<std::string, std::string>& headers
 ) {
     return perform("DELETE", url, nullptr, headers);

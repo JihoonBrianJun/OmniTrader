@@ -6,7 +6,7 @@
 #include "trader/order_gateway/order_gateway.hpp"
 #include "trader/order_gateway/binance/rest_order_gateway.hpp"
 #include "trader/order_gateway/binance/ws_order_gateway.hpp"
-#include "market_listener/exchange/binance/product_manager.hpp"
+#include "connection_handlers/rest/binance/binance_rest_client.hpp"
 
 
 namespace Omni::Binance {
@@ -32,7 +32,7 @@ class BinanceOrderGateway : public Omni::OrderGateway::IOrderGateway {
 
     private:
         quill::Logger* logger_;
-        std::shared_ptr<ProductManager> product_manager_;
+        std::shared_ptr<BinanceRestClient> rest_client_;
         std::unique_ptr<RestOrderGateway> rest_gateway_;
         std::unique_ptr<WsOrderGateway> ws_gateway_;
 

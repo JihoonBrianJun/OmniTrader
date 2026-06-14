@@ -6,7 +6,7 @@
 
 #include "config_handlers/signer.hpp"
 #include "trader/order_gateway/order_gateway.hpp"
-#include "market_listener/exchange/binance/product_manager.hpp"
+#include "connection_handlers/rest/binance/binance_rest_client.hpp"
 
 
 namespace Omni::Binance {
@@ -20,7 +20,7 @@ class RestOrderGateway : public OG::IOrderGateway {
             quill::Logger* logger,
             const std::string& rest_domain,
             std::shared_ptr<Omni::Config::ISigner> signer,
-            std::shared_ptr<ProductManager> product_manager
+            std::shared_ptr<BinanceRestClient> rest_client
         );
 
         void place_order(const OG::OrderPlaceInfo& info, OG::OrderResponse& response) override;
@@ -31,7 +31,7 @@ class RestOrderGateway : public OG::IOrderGateway {
         quill::Logger* logger_;
         std::string rest_domain_;
         std::shared_ptr<Omni::Config::ISigner> signer_;
-        std::shared_ptr<ProductManager> product_manager_;
+        std::shared_ptr<BinanceRestClient> rest_client_;
 
         // method: POST/PUT/DELETE; params: "k=v&..." without timestamp/signature.
         void send_order(

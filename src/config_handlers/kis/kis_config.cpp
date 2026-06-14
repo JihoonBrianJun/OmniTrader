@@ -9,7 +9,7 @@
 
 #include "utils/datetime.hpp"
 #include "config_handlers/config_utils.hpp"
-#include "connection_handlers/http/http_client.hpp"
+#include "connection_handlers/rest/rest_client.hpp"
 #include "kis_config.hpp"
 
 
@@ -78,7 +78,7 @@ static void update_rest_access_token(const std::string& token_save_path, quill::
         {"appsecret", auth_keys.second.secret}
     };
 
-    auto client = std::make_shared<Omni::Connection::HttpClient>(logger);
+    auto client = std::make_shared<Omni::Connection::RestClient>(logger);
     auto response = client->post(
         fmt::format("{}/oauth2/tokenP", auth_domain.second), request_data.dump()
     );
@@ -122,7 +122,7 @@ static void update_websocket_access_token(const std::string& token_save_path, qu
         {"secretkey", auth_keys.second.secret}
     };
 
-    auto client = std::make_shared<Omni::Connection::HttpClient>(logger);
+    auto client = std::make_shared<Omni::Connection::RestClient>(logger);
     auto response = client->post(
         fmt::format("{}/oauth2/Approval", auth_domain.second), request_data.dump()
     );
