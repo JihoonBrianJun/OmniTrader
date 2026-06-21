@@ -1,12 +1,13 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <string>
 #include <fmt/core.h>
 #include <quill/LogMacros.h>
-#include <nlohmann/json.hpp>
 
 #include "market_listener/exchange/binance/binance_common.hpp"
 #include "market_listener/exchange/binance/binance_listener.hpp"
+#include "market_listener/exchange/binance/market_dtypes.hpp"
 
 
 namespace Omni::Listener::Binance {
@@ -21,8 +22,10 @@ static std::string to_lower(std::string s) {
     return s;
 }
 
-static double sd(const nlohmann::json& j, const char* key) {
-    return std::stod(j.at(key).get<std::string>());
+// Binance encodes decimals as JSON strings; the dtype structs keep them as
+// std::string and this converts on use (empty -> 0.0).
+static double sd(const std::string& s) {
+    return s.empty() ? 0.0 : std::stod(s);
 }
 
 
@@ -320,52 +323,57 @@ void BinanceListener::resync_order_book(const std::string& product) {
 
 
 void BinanceListener::handle_market_payload(const std::string& payload) {
+    // Classify on data.e (partial read) before fully parsing the per-event struct.
+    constexpr glz::opts classify_opts{
+        .format = glz::JSON, .error_on_unknown_keys = false, .partial_read = true
+    };
+    constexpr glz::opts read_opts{.format = glz::JSON, .error_on_unknown_keys = false};
+
     try {
-        auto outer = nlohmann::json::parse(payload);
-        if (!outer.contains("data")) return;
-        const auto& data = outer.at("data");
-        auto event_type = data.value("e", std::string{});
+        MarketEventClassifier classifier;
+        if (glz::read<classify_opts>(classifier, payload)) return;
+        const std::string& event_type = classifier.data.e;
 
         if (event_type == "bookTicker") {
+            BookTickerEnvelope env;
+            if (glz::read<read_opts>(env, payload)) return;
+            const auto& t = env.data;
             Omni::OrderbookMsg msg;
-            msg.product = data.at("s").get<std::string>();
-            msg.orderbook_data.bid_book.push_back({sd(data, "b"), sd(data, "B")});
-            msg.orderbook_data.ask_book.push_back({sd(data, "a"), sd(data, "A")});
+            msg.product = t.s;
+            msg.orderbook_data.bid_book.push_back({sd(t.b), sd(t.B)});
+            msg.orderbook_data.ask_book.push_back({sd(t.a), sd(t.A)});
             event_queue_->enqueue(std::move(msg));
         } else if (event_type == "depthUpdate") {
-            auto product = data.at("s").get<std::string>();
-            auto book_it = order_books_.find(product);
+            DepthUpdateEnvelope env;
+            if (glz::read<read_opts>(env, payload)) return;
+            const auto& d = env.data;
+            auto book_it = order_books_.find(d.s);
             if (book_it == order_books_.end()) return;
 
             std::vector<OB::OrderBook::PriceLevel> bids, asks;
-            for (const auto& level : data.at("b")) {
-                bids.emplace_back(std::stod(level[0].get<std::string>()),
-                                  std::stod(level[1].get<std::string>()));
-            }
-            for (const auto& level : data.at("a")) {
-                asks.emplace_back(std::stod(level[0].get<std::string>()),
-                                  std::stod(level[1].get<std::string>()));
-            }
-            long U = data.at("U").get<long>();
-            long u = data.at("u").get<long>();
-            long pu = data.value("pu", -1L);
+            bids.reserve(d.b.size());
+            asks.reserve(d.a.size());
+            for (const auto& level : d.b) bids.emplace_back(sd(level[0]), sd(level[1]));
+            for (const auto& level : d.a) asks.emplace_back(sd(level[0]), sd(level[1]));
 
-            bool ok = book_it->second.apply_diff(U, u, pu, bids, asks);
+            bool ok = book_it->second.apply_diff(d.U, d.u, d.pu, bids, asks);
             if (!ok) {
-                LOG_WARNING(logger_, "Order book desynced for {}; resyncing", product);
-                resync_order_book(product);
+                LOG_WARNING(logger_, "Order book desynced for {}; resyncing", d.s);
+                resync_order_book(d.s);
                 return;
             }
 
             Omni::OrderbookMsg msg;
-            msg.product = product;
+            msg.product = d.s;
             msg.orderbook_data = book_it->second.to_data(config_.orderbook_levels);
             event_queue_->enqueue(std::move(msg));
         } else if (event_type == "aggTrade") {
+            AggTradeEnvelope env;
+            if (glz::read<read_opts>(env, payload)) return;
             Omni::TradeMsg msg;
-            msg.product = data.at("s").get<std::string>();
-            msg.trade_data.trade_price = sd(data, "p");
-            msg.trade_data.cum_trade_qty = sd(data, "q");
+            msg.product = env.data.s;
+            msg.trade_data.trade_price = sd(env.data.p);
+            msg.trade_data.cum_trade_qty = sd(env.data.q);
             event_queue_->enqueue(std::move(msg));
         }
     } catch (const std::exception& e) {
@@ -375,62 +383,68 @@ void BinanceListener::handle_market_payload(const std::string& payload) {
 
 
 void BinanceListener::handle_user_payload(const std::string& payload) {
-    try {
-        auto j = nlohmann::json::parse(payload);
-        auto event_type = j.value("e", std::string{});
+    // Classify on the top-level e (partial read) before fully parsing.
+    constexpr glz::opts classify_opts{
+        .format = glz::JSON, .error_on_unknown_keys = false, .partial_read = true
+    };
+    constexpr glz::opts read_opts{.format = glz::JSON, .error_on_unknown_keys = false};
 
-        if (event_type == "ORDER_TRADE_UPDATE") {
-            const auto& o = j.at("o");
+    try {
+        UserEventClassifier classifier;
+        if (glz::read<classify_opts>(classifier, payload)) return;
+
+        if (classifier.e == "ORDER_TRADE_UPDATE") {
+            OrderTradeUpdate update;
+            if (glz::read<read_opts>(update, payload)) return;
+            const auto& o = update.o;
+
             Omni::ExecutionMsg msg;
-            msg.product = o.at("s").get<std::string>();
+            msg.product = o.s;
             auto& d = msg.execution_data;
             d.update_position_on_fill = false;   // ACCOUNT_UPDATE is authoritative
-            d.order_no = std::to_string(o.at("i").get<long>());
-            d.client_order_id = o.value("c", std::string{});   // cid for trader routing
-            d.is_bid = (o.at("S").get<std::string>() == "BUY");
-            d.order_price = sd(o, "p");
+            d.order_no = std::to_string(o.i);
+            d.client_order_id = o.c;             // cid for trader routing
+            d.is_bid = (o.S == "BUY");
+            d.order_price = sd(o.p);
 
-            auto exec_type = o.at("x").get<std::string>();
-            double orig_qty = sd(o, "q");
-            double cum_filled = sd(o, "z");
+            double orig_qty = sd(o.q);
+            double cum_filled = sd(o.z);
 
-            if (exec_type == "NEW") {
+            if (o.x == "NEW") {
                 d.is_accept_data = true;
                 d.is_place = true;
                 d.is_accepted = true;
                 d.order_qty = orig_qty;
-            } else if (exec_type == "CANCELED" || exec_type == "EXPIRED") {
+            } else if (o.x == "CANCELED" || o.x == "EXPIRED") {
                 d.is_accept_data = true;
                 d.is_cancel = true;
                 d.original_order_no = d.order_no;
                 d.order_qty = orig_qty - cum_filled;   // remaining open qty removed
-            } else if (exec_type == "TRADE") {
+            } else if (o.x == "TRADE") {
                 d.is_executed = true;
-                d.execute_price = sd(o, "L");
-                d.execute_qty = sd(o, "l");
+                d.execute_price = sd(o.L);
+                d.execute_qty = sd(o.l);
             } else {
                 return;   // CALCULATED / AMENDMENT / etc. not modeled yet
             }
             event_queue_->enqueue(std::move(msg));
-        } else if (event_type == "ACCOUNT_UPDATE") {
-            const auto& a = j.at("a");
-            if (a.contains("B")) {
-                for (const auto& b : a.at("B")) {
-                    Omni::PositionMsg msg;
-                    msg.product = b.at("a").get<std::string>();   // asset symbol
-                    // Stream carries wallet balance ("wb") but not availableBalance;
-                    // the trader keeps the last snapshot's available until next snapshot.
-                    msg.position_data.balance = sd(b, "wb");
-                    event_queue_->enqueue(std::move(msg));
-                }
+        } else if (classifier.e == "ACCOUNT_UPDATE") {
+            AccountUpdate update;
+            if (glz::read<read_opts>(update, payload)) return;
+
+            for (const auto& b : update.a.B) {
+                Omni::PositionMsg msg;
+                msg.product = b.a;   // asset symbol
+                // Stream carries wallet balance ("wb") but not availableBalance;
+                // the trader keeps the last snapshot's available until next snapshot.
+                msg.position_data.balance = sd(b.wb);
+                event_queue_->enqueue(std::move(msg));
             }
-            if (a.contains("P")) {
-                for (const auto& p : a.at("P")) {
-                    Omni::PositionMsg msg;
-                    msg.product = p.at("s").get<std::string>();
-                    msg.position_data.balance = sd(p, "pa");      // signed position amount
-                    event_queue_->enqueue(std::move(msg));
-                }
+            for (const auto& p : update.a.P) {
+                Omni::PositionMsg msg;
+                msg.product = p.s;
+                msg.position_data.balance = sd(p.pa);   // signed position amount
+                event_queue_->enqueue(std::move(msg));
             }
         }
     } catch (const std::exception& e) {

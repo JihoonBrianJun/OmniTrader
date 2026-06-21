@@ -1,10 +1,10 @@
 #include <fmt/core.h>
 #include <quill/LogMacros.h>
-#include <nlohmann/json.hpp>
 #include <websocketpp/frame.hpp>
 
 #include "utils/datetime.hpp"
 #include "market_listener/exchange/binance/binance_common.hpp"
+#include "order_dtypes.hpp"
 #include "ws_order_gateway.hpp"
 
 
@@ -40,30 +40,40 @@ WsOrderGateway::~WsOrderGateway() {
 void WsOrderGateway::on_message(const std::string& payload) {
     // Parse the WS-API reply and hand it to the trader via the response sink. The
     // request id was set to the order's cid, so both success and error replies
-    // correlate back by cid (the error arm carries no result, hence no orderId).
+    // correlate back by cid. Branch on status (partial read) before fully parsing
+    // the result/error object.
+    constexpr glz::opts classify_opts{
+        .format = glz::JSON, .error_on_unknown_keys = false, .partial_read = true
+    };
+    constexpr glz::opts read_opts{.format = glz::JSON, .error_on_unknown_keys = false};
+
+    WsApiResponseClassifier classifier;
+    if (glz::read<classify_opts>(classifier, payload) || classifier.id.empty()) return;
+
+    OG::OrderResponse response;
     try {
-        auto j = nlohmann::json::parse(payload);
-        if (!j.contains("id")) return;
-
-        OG::OrderResponse response;
-        response.cid = std::stoull(j.at("id").get<std::string>());
-
-        int status = j.value("status", 0);
-        if (status == 200 && j.contains("result")) {
-            response.success = true;
-            const auto& result = j.at("result");
-            if (result.contains("orderId")) {
-                response.order_no = std::to_string(result.at("orderId").get<long>());
-            }
-        } else {
-            response.success = false;
-            if (j.contains("error")) response.msg = j.at("error").dump();
-        }
-
-        deliver(response);
+        response.cid = std::stoull(classifier.id);
     } catch (const std::exception& e) {
-        LOG_WARNING(logger_, "Failed to parse WS-API response: {}", e.what());
+        LOG_WARNING(logger_, "WS-API reply with non-numeric id '{}': {}", classifier.id, e.what());
+        return;
     }
+
+    if (classifier.status == 200) {
+        response.success = true;
+        WsApiSuccessResponse ok;
+        if (!glz::read<read_opts>(ok, payload) && ok.result.orderId != 0) {
+            response.order_no = std::to_string(ok.result.orderId);
+        }
+    } else {
+        response.success = false;
+        WsApiErrorResponse err;
+        if (!glz::read<read_opts>(err, payload)) {
+            response.code = std::to_string(err.error.code);
+            response.msg = err.error.msg;
+        }
+    }
+
+    deliver(response);
 }
 
 
@@ -85,11 +95,16 @@ bool WsOrderGateway::send_request(
     }
     params["signature"] = signer_->sign(query);
 
-    nlohmann::json req;
-    req["id"] = std::to_string(cid);   // reply correlates back by cid
-    req["method"] = method;
-    req["params"] = params;            // all string values
-    std::string payload = req.dump();
+    WsApiRequest req{
+        .id = std::to_string(cid),     // reply correlates back by cid
+        .method = method,
+        .params = std::move(params)    // all string values
+    };
+    std::string payload;
+    if (glz::write_json(req, payload)) {
+        LOG_WARNING(logger_, "WS-API request serialization failed");
+        return false;
+    }
 
     try {
         client_->send(client_->get_connection_hdl(), payload, websocketpp::frame::opcode::TEXT);

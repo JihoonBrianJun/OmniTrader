@@ -1,10 +1,10 @@
 #include <fmt/core.h>
 #include <quill/LogMacros.h>
-#include <nlohmann/json.hpp>
 
 #include "utils/datetime.hpp"
 #include "connection_handlers/rest/rest_client.hpp"
 #include "market_listener/exchange/binance/binance_common.hpp"
+#include "order_dtypes.hpp"
 #include "rest_order_gateway.hpp"
 
 
@@ -56,12 +56,11 @@ void RestOrderGateway::send_order(
         return;
     }
 
-    try {
-        auto j = nlohmann::json::parse(http.body);
-        response.success = true;
-        if (j.contains("orderId")) response.order_no = std::to_string(j.at("orderId").get<long>());
-    } catch (const std::exception& e) {
-        LOG_WARNING(logger_, "Failed to parse Binance order response: {}", e.what());
+    response.success = true;
+    RestOrderResponse parsed;
+    constexpr glz::opts read_opts{.format = glz::JSON, .error_on_unknown_keys = false};
+    if (!glz::read<read_opts>(parsed, http.body) && parsed.orderId != 0) {
+        response.order_no = std::to_string(parsed.orderId);
     }
     deliver(response);
 }
