@@ -79,7 +79,7 @@ struct TraderConfig {
         program.add_argument("--market_type").default_value(std::string("derivatives"));
         program.add_argument("--trade_products")
             .nargs(argparse::nargs_pattern::any)
-            .default_value(std::vector<std::string>{"BTCUSDT"});
+            .default_value(std::vector<std::string>{"BTCUSDT:futures"});   // SYMBOL[:category]
         program.add_argument("--subscribe_products")
             .nargs(argparse::nargs_pattern::any)
             .default_value(std::vector<std::string>{});

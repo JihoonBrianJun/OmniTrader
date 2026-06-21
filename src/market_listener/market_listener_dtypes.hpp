@@ -54,7 +54,7 @@ struct ListenerConfig {
         program.add_argument("--market_end_intraday_minute").scan<'i', int64_t>().default_value(int64_t{-1});
         program.add_argument("--products")
             .nargs(argparse::nargs_pattern::any)
-            .default_value(std::vector<std::string>{"BTCUSDT"});
+            .default_value(std::vector<std::string>{"BTCUSDT:futures"});   // SYMBOL[:category]
         program.add_argument("--products_db_base_path").default_value(std::string("products"));
         program.add_argument("--orderbook_save_path").default_value(std::string("orderbook_record"));
         program.add_argument("--trade_save_path").default_value(std::string("trade_record"));
