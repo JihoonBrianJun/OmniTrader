@@ -31,6 +31,7 @@ static std::unique_ptr<Omni::OrderGateway::IOrderGateway> create_order_gateway(
 
 OrderHandler::OrderHandler(
     const MarketConfig& market_config,
+    const PricerConfig& pricer_config,
     std::shared_ptr<BaseStrategy> strategy,
     const TraderConfig& config,
     quill::Logger* logger
@@ -46,7 +47,7 @@ OrderHandler::OrderHandler(
     broadcast_port_(config.broadcast_port),
     order_update_interval_ns_(config.order_update_interval_ms * 1000000),
     order_gateway_(create_order_gateway(config, logger)),
-    pricer_(market_config.min_tick_size, market_config.lot_size),
+    pricer_(pricer_config, market_config.min_tick_size, market_config.lot_size),
     product_info_ready_(market_config.min_tick_size > 0 && market_config.lot_size > 0),
     io_context_(std::make_unique<boost::asio::io_context>()),
     tcp_connecting_(false),
@@ -445,7 +446,7 @@ void OrderHandler::update_orders(const std::string& product) {
     }
 
     PriceInfo price_info;
-    pricer_.fetch_mid_price(state.l1, price_info);
+    pricer_.fetch_fair_price(state.l1, price_info);
     LOG_INFO(
         logger_,
         "[Decision] {} bbid={} bask={} mid={} fair={} position_lots={} outstanding={} positions=[{}]",

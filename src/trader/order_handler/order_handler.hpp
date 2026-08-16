@@ -28,6 +28,7 @@ class OrderHandler {
 public:
     OrderHandler(
         const MarketConfig& market_config,
+        const PricerConfig& pricer_config,
         std::shared_ptr<BaseStrategy> strategy,
         const TraderConfig& config,
         quill::Logger* logger

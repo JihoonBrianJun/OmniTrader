@@ -35,7 +35,9 @@ exchange feeds → │ IExchangeListener adapter         │ → normalized even
 
 The trader is structured as **pricer → strategy → order_handler** (mirroring the
 `orderbook-backtest` project): [pricer/](src/trader/pricer/) computes `PriceInfo`
-from the live L1, [strategy/](src/trader/strategy/) (`BaseStrategy`/`GeuantStrategy`
+from the live L1 via `fetch_fair_price`, with the fair-price definition selected by
+`--pricer_mode` (`MID` — the default — or `VWAP`, the size-weighted top-of-book
+price), [strategy/](src/trader/strategy/) (`BaseStrategy`/`GeuantStrategy`
 with `make_decision`) decides orders in tick/lot units, and
 [order_handler/](src/trader/order_handler/) maps those to the `IOrderGateway` and
 tracks per-product position/outstanding state. CLI parsing uses the `argparse`
@@ -120,3 +122,7 @@ KIS has no spot/futures/asset distinction, so the `:category` suffix is unnecess
 
 Out of scope for now: KIS us_stock, Binance COIN-M/options/batch orders, Binance
 order amend `side` param, and Ed25519/session.logon (HMAC only).
+
+The `orderbook-backtest` `FACTOR` pricer mode is also out of scope: it reads a
+per-date gzip CSV of pre-computed factors through that project's `data_reader`,
+which has no live counterpart here. `--pricer_mode` accepts `MID`/`VWAP` only.

@@ -9,14 +9,14 @@ namespace Omni::Trader {
 // maintained by the order handler.
 class Pricer {
 public:
-    Pricer(double min_tick_size, double lot_size);
+    Pricer(const PricerConfig& config, double min_tick_size, double lot_size);
 
     void set_params(double min_tick_size, double lot_size);
 
-    void fetch_mid_price(const L1& l1, PriceInfo& price_info);
-    void fetch_vwap(const L1& l1, PriceInfo& price_info);
+    void fetch_fair_price(const L1& l1, PriceInfo& price_info);
 
 private:
+    PricerConfig::Mode mode_;
     double min_tick_size_, lot_size_;
 
     double to_double_price(int64_t price_in_min_ticks);
@@ -25,6 +25,7 @@ private:
     double compute_mid_price(
         int64_t bbid_price_in_min_ticks, int64_t bask_price_in_min_ticks
     );
+    double compute_vwap(const L1& l1);
 };
 
 } // namespace Omni::Trader

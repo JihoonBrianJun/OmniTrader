@@ -23,6 +23,7 @@ int main(int argc, char* argv[]) {
     argparse::ArgumentParser program("trader");
     Omni::Trader::TraderConfig::set_parser(program);
     Omni::Trader::MarketConfig::set_parser(program);
+    Omni::Trader::PricerConfig::set_parser(program);
     Omni::Trader::set_strategy_specific_parser(strategy_name, program);
 
     try {
@@ -49,6 +50,9 @@ int main(int argc, char* argv[]) {
     Omni::Trader::MarketConfig market_config;
     market_config.init(program);
 
+    Omni::Trader::PricerConfig pricer_config;
+    pricer_config.init(program);
+
     auto strategy = Omni::Trader::init_strategy(market_config, program);
     if (!strategy) {
         std::cerr << "Unknown strategy: " << strategy_name << std::endl;
@@ -56,7 +60,7 @@ int main(int argc, char* argv[]) {
     }
 
     auto order_handler = std::make_unique<Omni::Trader::OrderHandler>(
-        market_config, strategy, config, logger
+        market_config, pricer_config, strategy, config, logger
     );
 
     while (
