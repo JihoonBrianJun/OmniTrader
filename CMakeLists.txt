@@ -15,10 +15,11 @@ find_package(concurrentqueue REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(argparse REQUIRED)
 
-# All shared/library sources (everything under src/ except the two entrypoints).
+# All shared/library sources (everything under src/ except the entrypoints).
 file(GLOB_RECURSE OMNI_CORE_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 list(REMOVE_ITEM OMNI_CORE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/listener_main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/pricer_main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/trader_main.cpp
 )
 
@@ -41,6 +42,9 @@ target_link_libraries(omni_core
 
 add_executable(listener src/listener_main.cpp)
 target_link_libraries(listener PRIVATE omni_core)
+
+add_executable(pricer src/pricer_main.cpp)
+target_link_libraries(pricer PRIVATE omni_core)
 
 add_executable(trader src/trader_main.cpp)
 target_link_libraries(trader PRIVATE omni_core)

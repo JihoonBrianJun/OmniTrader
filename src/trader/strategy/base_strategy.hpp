@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <argparse/argparse.hpp>
 
-#include "trader/pricer/pricer_dtypes.hpp"
+#include "trader/price_dtypes.hpp"
 #include "utils/tick_configs.hpp"
 
 // Mirrors orderbook-backtest base_strategy (MarketConfig / OutstandingOrder /

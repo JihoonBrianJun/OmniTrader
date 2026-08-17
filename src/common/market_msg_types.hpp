@@ -139,6 +139,26 @@ struct ProductInfoMsg {
     ProductInfoData product_info_data = {};
 };
 
+// A product's fair price, published by the pricer executable and consumed by the
+// trader's strategy. This is the pricer's only output: the trader takes top-of-book
+// straight from the listener and gets fair price from here, falling back to its own
+// mid whenever this is missing or stale.
+//
+// `ts` is the ns timestamp at which the fair price was computed; the trader uses it
+// to age the value out. `factor` is set only when the pricer runs in FACTOR mode
+// (fair = factor * mid, matching orderbook-backtest's pre-computed `FactorTick`) and
+// is carried purely so the trader can log which factor produced the price it used.
+struct FairPriceData {
+    int64_t ts = 0;
+    std::optional<double> fair_price = std::nullopt;
+    std::optional<double> factor = std::nullopt;
+};
+struct FairPriceMsg {
+    std::string feed = "fair_price";
+    std::string product = "";
+    FairPriceData fair_price_data = {};
+};
+
 // Used for glaze partial read to classify an incoming TCP line by feed.
 struct FeedClassifier {
     std::string feed;

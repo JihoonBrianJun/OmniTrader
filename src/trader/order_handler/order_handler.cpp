@@ -31,7 +31,6 @@ static std::unique_ptr<Omni::OrderGateway::IOrderGateway> create_order_gateway(
 
 OrderHandler::OrderHandler(
     const MarketConfig& market_config,
-    const PricerConfig& pricer_config,
     std::shared_ptr<BaseStrategy> strategy,
     const TraderConfig& config,
     quill::Logger* logger
@@ -45,13 +44,16 @@ OrderHandler::OrderHandler(
     subscribe_products_(config.subscribe_products),   // already includes the trade-product fallback
     broadcast_host_address_(config.broadcast_host_address),
     broadcast_port_(config.broadcast_port),
+    pricer_host_address_(config.pricer_host_address),
+    pricer_port_(config.pricer_port),
+    fair_price_max_age_ns_(config.fair_price_max_age_ms * 1000000),
     order_update_interval_ns_(config.order_update_interval_ms * 1000000),
     order_gateway_(create_order_gateway(config, logger)),
-    pricer_(pricer_config, market_config.min_tick_size, market_config.lot_size),
     product_info_ready_(market_config.min_tick_size > 0 && market_config.lot_size > 0),
     io_context_(std::make_unique<boost::asio::io_context>()),
-    tcp_connecting_(false),
-    tcp_connected_(false)
+    listener_connecting_(false),
+    listener_connected_(false),
+    pricer_connected_(false)
 {
     for (const auto& product : trade_products_) {
         product_states_[product];
@@ -66,16 +68,24 @@ OrderHandler::OrderHandler(
             trader_queue_.enqueue(response);
         }
     );
-    tcp_client_ = std::make_unique<Connection::TcpClient>(
-        *io_context_, logger_, &trader_queue_
+    listener_client_ = std::make_unique<Connection::MarketFeedClient<Task>>(
+        logger_, &trader_queue_, broadcast_host_address_, broadcast_port_
+    );
+    // The fair-price feed is a second, independent link, so a pricer outage degrades
+    // the trader to plain mid (via the value ageing out) rather than cutting market
+    // data. It is always dialled: with no pricer running the trader just prices off
+    // mid, which is what the pricer's own default (MID) would have produced anyway.
+    pricer_client_ = std::make_unique<Connection::FairPriceClient<Task>>(
+        logger_, &trader_queue_, pricer_host_address_, pricer_port_
     );
     set_order_update_timer();
-    start_tcp_client();
+    start_feed_clients();
 }
 
 
 OrderHandler::~OrderHandler() {
-    if (tcp_client_) tcp_client_->disconnect();
+    if (listener_client_) listener_client_->stop();
+    if (pricer_client_) pricer_client_->stop();
     if (io_context_) io_context_->stop();
     if (io_thread_.joinable()) io_thread_.join();
 }
@@ -117,33 +127,54 @@ void OrderHandler::set_order_update_timer() {
 }
 
 
-void OrderHandler::start_tcp_client() {
-    tcp_client_->connect(broadcast_host_address_, broadcast_port_);
+void OrderHandler::start_feed_clients() {
+    // Each client dials on, and keeps retrying from, its own io thread; this one
+    // carries only the order-update timer.
+    listener_client_->start();
+    if (pricer_client_) pricer_client_->start();
+
     io_thread_ = std::thread([this]() {
         try {
             io_context_->run();
         } catch (const std::exception& e) {
-            LOG_WARNING(logger_, "Exception within TCP client thread: {}", e.what());
+            LOG_WARNING(logger_, "Exception within order update timer thread: {}", e.what());
         }
     });
 }
 
 
-void OrderHandler::on_tcp_status(const TcpStatusUpdate& response) {
-    if (!tcp_connected_ && response.connected) {
+void OrderHandler::on_listener_status(const ListenerStatusUpdate& response) {
+    if (!listener_connected_ && response.connected) {
         for (const auto& spec : subscribe_products_) {
-            tcp_client_->subscribe(spec.product, spec.category);
-            LOG_INFO(logger_, "Subscribed product {} on tcp server", spec.product);
+            listener_client_->subscribe(spec.product, spec.category);
+            LOG_INFO(logger_, "Subscribed product {} on listener server", spec.product);
         }
-    } else if (tcp_connected_ && !response.connected) {
-        tcp_client_->connect(broadcast_host_address_, broadcast_port_);
+    } else if (listener_connected_ && !response.connected) {
+        LOG_WARNING(logger_, "Listener link down; holding off decisions until it is back");
     }
-    tcp_connecting_ = response.connecting;
-    tcp_connected_ = response.connected;
+    listener_connecting_ = response.connecting;
+    listener_connected_ = response.connected;
 }
 
 
-void OrderHandler::on_tcp_subscribe(const TcpSubscribeUpdate& /*response*/) {
+void OrderHandler::on_pricer_status(const PricerStatusUpdate& response) {
+    if (!pricer_client_) return;
+
+    if (!pricer_connected_ && response.connected) {
+        // Only the traded products carry a fair price; the extra subscriptions a
+        // trader keeps on the listener (e.g. an asset balance) have none.
+        for (const auto& product : trade_products_) {
+            pricer_client_->subscribe(product, Category::futures);
+            LOG_INFO(logger_, "Subscribed product {} on pricer server", product);
+        }
+    } else if (pricer_connected_ && !response.connected) {
+        LOG_WARNING(logger_, "Pricer link down; pricing off mid until it is back");
+    }
+    pricer_connected_ = response.connected;
+}
+
+
+void OrderHandler::on_listener_subscribe(const ListenerSubscribeUpdate& /*response*/) {
     // no-op for now
 }
 
@@ -375,30 +406,76 @@ void OrderHandler::on_product_info(const std::string& product, const ProductInfo
 
     min_tick_size_ = min_tick;
     lot_size_ = lot;
-    pricer_.set_params(min_tick, lot);
     strategy_->set_market_params(min_tick, lot);
     product_info_ready_ = true;
     LOG_INFO(logger_, "[ProductInfo] {} min_tick_size={} lot_size={}", product, min_tick, lot);
 }
 
 
-void OrderHandler::process_market_data(const TcpMarketDataResponse& response) {
+void OrderHandler::on_fair_price(const std::string& product, const FairPriceData& data) {
+    auto it = product_states_.find(product);
+    if (it == product_states_.end()) return;
+
+    // A price-less tick is recorded as NaN so we fall back to mid rather than reuse
+    // the previous value. `factor` is only ever set when the pricer runs in FACTOR
+    // mode, and is carried for logging alone.
+    it->second.fair_price = FairPriceState{
+        .ts = data.ts,
+        .fair_price = data.fair_price.value_or(NAN),
+        .factor = data.factor.value_or(NAN)
+    };
+}
+
+
+void OrderHandler::build_price_info(const ProductState& state, PriceInfo& price_info) {
+    price_info.bbid_price_in_min_ticks = state.l1.bbid_price_in_min_ticks;
+    price_info.bask_price_in_min_ticks = state.l1.bask_price_in_min_ticks;
+    price_info.applied_factor = NAN;
+
+    if ((state.l1.bbid_price_in_min_ticks == -1) || (state.l1.bask_price_in_min_ticks == -1)) {
+        // No two-sided book yet: leave both prices NaN so the caller skips the
+        // decision instead of quoting off a half-empty book.
+        price_info.mid_price = NAN;
+        price_info.fair_price = NAN;
+        return;
+    }
+
+    price_info.mid_price = to_double_price(
+        state.l1.bbid_price_in_min_ticks + state.l1.bask_price_in_min_ticks
+    ) / 2;
+
+    // Fair price is the pricer's to define. Anything that stops it reaching us — the
+    // process down, the link dropped, its own book not ready — falls back to mid.
+    bool usable = !std::isnan(state.fair_price.fair_price)
+        && (fair_price_max_age_ns_ <= 0
+            || (get_curr_tstamp_ns() - state.fair_price.ts) <= fair_price_max_age_ns_);
+
+    if (usable) {
+        price_info.fair_price = state.fair_price.fair_price;
+        price_info.applied_factor = state.fair_price.factor;
+    } else {
+        price_info.fair_price = price_info.mid_price;
+    }
+}
+
+
+void OrderHandler::process_market_data(const MarketDataResponse& response) {
     switch (response.feed) {
-        case TcpMarketDataResponse::Feed::Orderbook:
+        case MarketDataResponse::Feed::Orderbook:
             on_orderbook(response.product, std::get<OrderbookData>(response.data));
             break;
-        case TcpMarketDataResponse::Feed::Trade:
+        case MarketDataResponse::Feed::Trade:
             break;
-        case TcpMarketDataResponse::Feed::Execution:
+        case MarketDataResponse::Feed::Execution:
             on_execution(response.product, std::get<ExecutionData>(response.data));
             break;
-        case TcpMarketDataResponse::Feed::Position:
+        case MarketDataResponse::Feed::Position:
             on_position(response.product, std::get<PositionData>(response.data));
             break;
-        case TcpMarketDataResponse::Feed::ProductInfo:
+        case MarketDataResponse::Feed::ProductInfo:
             on_product_info(response.product, std::get<ProductInfoData>(response.data));
             break;
-        case TcpMarketDataResponse::Error:
+        case MarketDataResponse::Error:
             break;
     }
 }
@@ -411,6 +488,14 @@ void OrderHandler::update_orders(const std::string& product) {
         return;
     }
     auto& state = state_it->second;
+
+    // With the listener away, L1 is frozen at whatever it last was. Quoting off a book
+    // that is no longer being updated is worse than not quoting, so hold off until it
+    // is back -- the same reason the pricer stops publishing when its own feed drops.
+    if (!listener_connected_) {
+        LOG_INFO(logger_, "[Decision] {} skipped: listener link down (book is stale)", product);
+        return;
+    }
 
     // Wait until tick/lot are known (from listener product info or CLI fallback).
     if (!product_info_ready_) {
@@ -446,14 +531,14 @@ void OrderHandler::update_orders(const std::string& product) {
     }
 
     PriceInfo price_info;
-    pricer_.fetch_fair_price(state.l1, price_info);
+    build_price_info(state, price_info);
     LOG_INFO(
         logger_,
-        "[Decision] {} bbid={} bask={} mid={} fair={} position_lots={} outstanding={} positions=[{}]",
+        "[Decision] {} bbid={} bask={} mid={} fair={} factor={} position_lots={} outstanding={} positions=[{}]",
         product,
         to_double_price(price_info.bbid_price_in_min_ticks),
         to_double_price(price_info.bask_price_in_min_ticks),
-        price_info.mid_price, price_info.fair_price,
+        price_info.mid_price, price_info.fair_price, price_info.applied_factor,
         state.position_in_lots, state.outstanding_orders.size(),
         format_positions()
     );
@@ -546,9 +631,12 @@ void OrderHandler::run() {
     trader_queue_.wait_dequeue(task);
 
     std::visit(overloaded{
-        [&](const TcpStatusUpdate& response) { on_tcp_status(response); },
-        [&](const TcpSubscribeUpdate& response) { on_tcp_subscribe(response); },
-        [&](const TcpMarketDataResponse& response) { process_market_data(response); },
+        [&](const ListenerStatusUpdate& response) { on_listener_status(response); },
+        [&](const ListenerSubscribeUpdate& response) { on_listener_subscribe(response); },
+        [&](const MarketDataResponse& response) { process_market_data(response); },
+        [&](const PricerStatusUpdate& response) { on_pricer_status(response); },
+        [&](const PricerSubscribeUpdate& /*response*/) { },
+        [&](const FairPriceResponse& response) { on_fair_price(response.product, response.data); },
         [&](const OrderUpdate& update) { update_orders(update.product); },
         [&](const OrderResponseTask& response) { on_order_response(response); }
     }, task);

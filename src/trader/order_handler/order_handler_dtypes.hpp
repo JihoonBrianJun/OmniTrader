@@ -5,7 +5,7 @@
 #include <string>
 #include <cstdint>
 
-#include "trader/pricer/pricer_dtypes.hpp"
+#include "trader/price_dtypes.hpp"
 #include "trader/strategy/base_strategy.hpp"
 
 namespace Omni::Trader {
@@ -25,6 +25,9 @@ struct ResponseWaitingOrders {
 // id (cid, mirroring the backtest) and mapped to the exchange order id (order_no).
 struct ProductState {
     L1 l1;
+    // Latest fair price from the pricer executable; left unset (NaN) until one
+    // arrives, in which case the order handler prices off mid instead.
+    FairPriceState fair_price;
     int32_t position_in_lots = 0;
     std::map<uint64_t, OutstandingOrder> outstanding_orders;
     std::map<uint64_t, std::string> cid_to_order_no;

@@ -6,33 +6,13 @@
 #include <argparse/argparse.hpp>
 
 #include "common/market_msg_types.hpp"
+#include "common/feed_msg_types.hpp"
 #include "trader/order_gateway/order_gateway_dtypes.hpp"
 
 namespace Omni::Trader {
 
-struct TcpStatusUpdate {
-    bool connecting;
-    bool connected;
-};
-
-struct TcpSubscribeUpdate {
-    bool subscribe;
-    bool success;
-    std::string product;
-};
-
-struct TcpMarketDataResponse {
-    enum Feed {
-        Orderbook,
-        Trade,
-        Execution,
-        Position,
-        ProductInfo,
-        Error
-    } feed;
-    std::string product;   // for an asset position this carries the asset (e.g. "USDC")
-    std::variant<OrderbookData, TradeData, ExecutionData, PositionData, ProductInfoData> data;
-};
+// The feed task types live in common/feed_msg_types.hpp (shared with the pricer);
+// unqualified uses below resolve to the enclosing Omni namespace.
 
 struct OrderUpdate {
     std::string product;
@@ -42,8 +22,18 @@ struct OrderUpdate {
 // gateway's response sink and correlated back to the order by cid.
 using OrderResponseTask = Omni::OrderGateway::OrderResponse;
 
+// One queue, fed by three producers: the listener link's io thread, the pricer link's
+// io thread, and the order gateway's response sink. Which of them enqueued a task is
+// answered by its type, so run() dispatches with no branching.
+//
+// Tasks from different producers are therefore not ordered against each other -- a
+// fair price and an orderbook update that arrive together may be handled in either
+// order. That is harmless here: the fair price carries the timestamp the pricer
+// computed it at and ages out on its own, independently of the book.
 using Task = std::variant<
-    TcpStatusUpdate, TcpSubscribeUpdate, TcpMarketDataResponse, OrderUpdate, OrderResponseTask
+    ListenerStatusUpdate, ListenerSubscribeUpdate, MarketDataResponse,
+    PricerStatusUpdate, PricerSubscribeUpdate, FairPriceResponse,
+    OrderUpdate, OrderResponseTask
 >;
 
 // Wiring/config consumed by the order handler and the order-gateway factories.
@@ -57,6 +47,15 @@ struct TraderConfig {
     std::vector<ProductSpec> subscribe_products = {{"BTCUSDT", Category::futures}};
     std::string broadcast_host_address = "0.0.0.0";
     unsigned short broadcast_port = 8888;
+    // Second internal link, to the pricer executable, which is where fair price comes
+    // from. Always dialled; if nothing is listening the trader simply keeps pricing
+    // off its own mid.
+    std::string pricer_host_address = "0.0.0.0";
+    unsigned short pricer_port = 8889;
+    // How long a received fair price stays usable. A pricer that died or a link that
+    // dropped must not go on skewing quotes, so the value ages out and the trader
+    // falls back to mid. 0 disables ageing.
+    long fair_price_max_age_ms = 1000;
     std::string domain_type = "real";   // selects real vs test endpoints (REST + WS-API)
     long order_update_interval_ms = 1000;
 
@@ -85,6 +84,10 @@ struct TraderConfig {
             .default_value(std::vector<std::string>{});
         program.add_argument("--broadcast_host_address").default_value(std::string("0.0.0.0"));
         program.add_argument("--broadcast_port").scan<'i', int>().default_value(8888);
+        program.add_argument("--pricer_host_address").default_value(std::string("0.0.0.0"));
+        program.add_argument("--pricer_port").scan<'i', int>().default_value(8889);
+        program.add_argument("--fair_price_max_age_ms")
+            .scan<'i', int64_t>().default_value(int64_t{1000});
         program.add_argument("--domain_type").default_value(std::string("real"));
         program.add_argument("--order_update_interval_ms").scan<'i', int64_t>().default_value(int64_t{1000});
         program.add_argument("--timezone_minute_offset").scan<'i', int64_t>().default_value(int64_t{0});
@@ -120,6 +123,9 @@ struct TraderConfig {
         }
         broadcast_host_address = program.get<std::string>("--broadcast_host_address");
         broadcast_port = static_cast<unsigned short>(program.get<int>("--broadcast_port"));
+        pricer_host_address = program.get<std::string>("--pricer_host_address");
+        pricer_port = static_cast<unsigned short>(program.get<int>("--pricer_port"));
+        fair_price_max_age_ms = program.get<int64_t>("--fair_price_max_age_ms");
         domain_type = program.get<std::string>("--domain_type");
         order_update_interval_ms = program.get<int64_t>("--order_update_interval_ms");
         timezone_minute_offset = program.get<int64_t>("--timezone_minute_offset");
