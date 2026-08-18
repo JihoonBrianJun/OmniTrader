@@ -39,6 +39,17 @@ class BinanceRestClient {
 
         // --- exchangeInfo product filters ---
         void load();   // GET /fapi/v1/exchangeInfo -> per-product tick/step filters
+
+        // Overwrite one product's grid from an outside source (the trader feeds this
+        // from the listener's product_info, which is refreshed periodically -- load()
+        // alone would leave this frozen at construction while the venue moves).
+        // Derives the display precisions from the new sizes, so formatting can never
+        // disagree with the grid it is formatting onto.
+        //
+        // Not synchronised: on the trader this is called from the same thread as
+        // place/amend, which are the only readers.
+        void set_filter(const std::string& product, double tick_size, double step_size);
+
         bool has(const std::string& product) const;
         ProductFilter filter(const std::string& product) const;
 

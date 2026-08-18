@@ -21,6 +21,17 @@
 
 namespace Omni::Trader {
 
+// Move an outbound order's price/qty from the trader's global normalization grid
+// onto the product's real grid on the venue. This is the only place a product's own
+// tick/lot is consulted -- see MarketConfig for why it is confined to submission.
+// Returns false if the quantity rounds away to nothing on that grid, meaning there
+// is no order left to send.
+//
+// Free rather than a member: it reads no handler state, only its arguments.
+bool snap_to_product_grid(
+    const Omni::ProductInfoData& info, bool is_bid, double& price, double& qty
+);
+
 // Live equivalent of orderbook-backtest BaseOrderHandler. Drives the same
 // pricer -> strategy.make_decision -> order submission flow, but sourced from the
 // listener's TCP market/user feed and routed through an IOrderGateway (the real
@@ -44,7 +55,10 @@ public:
 private:
     quill::Logger* logger_;
     MarketConfig market_config_;
-    double min_tick_size_, lot_size_;
+    // The process-global normalization units. const: every int64 price and int32
+    // quantity in this handler, in ProductState, and inside the strategy is a count
+    // of these, so they cannot be rebased once anything has been recorded.
+    const double min_tick_size_, default_lot_size_;
     std::shared_ptr<BaseStrategy> strategy_;
 
     const std::vector<std::string> trade_products_;
@@ -57,10 +71,6 @@ private:
     long order_update_interval_ns_;
 
     std::unique_ptr<Omni::OrderGateway::IOrderGateway> order_gateway_;
-
-    // tick/lot become ready either from CLI fallback (if provided) or once the
-    // listener publishes product info; orders wait until then.
-    bool product_info_ready_;
 
     std::map<std::string, ProductState> product_states_;
     std::map<std::string, std::string> order_no_to_product_;
@@ -111,10 +121,12 @@ private:
     void on_pricer_status(const PricerStatusUpdate& response);
     void process_market_data(const MarketDataResponse& response);
 
+    // Conversions between doubles and the global normalization units.
     int64_t to_price_in_min_ticks(double price);
     int32_t to_qty_in_lots(double qty);
     double to_double_price(int64_t price_in_min_ticks);
     double to_double_qty(int32_t qty_in_lots);
+
 
     void on_orderbook(const std::string& product, const OrderbookData& data);
     void on_execution(const std::string& product, const ExecutionData& data);

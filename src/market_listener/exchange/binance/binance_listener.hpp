@@ -36,6 +36,7 @@ class BinanceListener : public IExchangeListener {
 
         void start() override;
         void stop() override;
+        void publish_product_info() override;
 
     private:
         enum class Socket { Market, User };
@@ -65,7 +66,6 @@ class BinanceListener : public IExchangeListener {
         std::unique_ptr<boost::asio::io_context> io_context_;
         std::unique_ptr<boost::asio::steady_timer> market_reconnect_timer_, user_reconnect_timer_;
         std::unique_ptr<boost::asio::steady_timer> keepalive_timer_;
-        std::unique_ptr<boost::asio::steady_timer> product_info_timer_;
         std::thread io_thread_, worker_thread_;
         std::atomic<bool> running_;
 
@@ -75,8 +75,6 @@ class BinanceListener : public IExchangeListener {
         void schedule_market_reconnect();
         void schedule_user_reconnect();
         void schedule_keepalive();
-        void publish_product_info();
-        void schedule_product_info_refresh();
 
         void worker_loop();
         void on_ws_status(const WsStatus& status);

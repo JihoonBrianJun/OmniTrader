@@ -177,18 +177,85 @@ balance is just a position keyed by the asset symbol).
 # terminal 1  (BTCUSDT futures market/position + USDT wallet balance)
 build/listener --exchange binance --domain_type test \
     --products BTCUSDT:futures USDT:asset --broadcast_port 8888
-# terminal 2  (tick/lot are fetched from the listener; --min_tick_size/--lot_size
-#              are optional CLI fallbacks used only if the listener doesn't publish them)
+# terminal 2  (--min_tick_size/--default_lot_size are required: they are the units
+#              every internal price and quantity is a count of)
 build/trader --exchange binance --domain_type test \
     --trade_products BTCUSDT:futures --subscribe_products BTCUSDT:futures USDT:asset \
+    --min_tick_size 0.1 --default_lot_size 0.001 \
     --broadcast_port 8888
 ```
 
-`--subscribe_products` defaults to `--trade_products` when omitted. The listener
-publishes per-product trading parameters (tick/lot from Binance `exchangeInfo`) as
-a `product_info` message (replayed to each newly subscribed trader); the trader
-consumes it and configures its pricer/strategy, so you don't pass tick/lot on the
-trader CLI.
+`--subscribe_products` defaults to `--trade_products` when omitted.
+
+### Two grids, on purpose
+
+The trader runs on two different notions of tick and lot, and keeping them apart is
+what lets one process trade several products safely.
+
+| | source | scope | used for |
+|---|---|---|---|
+| `--min_tick_size` / `--default_lot_size` | trader CLI, required | process-global, fixed for the run | normalizing every price to an `int64` tick count and every quantity to an `int32` lot count |
+| `product_info` (`tick_size`, `lot_size`) | listener, per product, refreshed | one product, may change mid-session | snapping an order's price and quantity on the way to the exchange |
+
+Everything the trader holds — L1, positions, outstanding orders, the strategy's own
+limits and arithmetic — is denominated in the **global** units. They are read once
+from the CLI and never rewritten, because a venue can change a product's filter
+under a live session and rebasing the unit would silently reinterpret every number
+already recorded in it: a position of 50 lots means something different the instant
+the lot changes underneath it. The trader refuses to start if either is missing or
+non-positive; there is no sane default for a unit.
+
+**`--min_tick_size` must be at least as fine as the finest product you trade.** It is
+the resolution of every internal price, so a product whose real tick is finer cannot
+be represented: prices quantize coarser than the venue's own grid, and tick-based
+ladder levels merge into a single order before anything downstream can separate them.
+The trader logs a warning naming the product and the value to drop to when it sees
+this, but it cannot fix it — only a lower `--min_tick_size` can.
+
+The **per-product** grid is applied at order submission, in `snap_to_product_grid`,
+which rounds price and quantity to the *nearest* grid point — the goal is the order
+the strategy actually asked for, and directional rounding would bias every order
+away from the decided price by up to a tick and shave every size by up to a lot. An
+order whose quantity rounds away to nothing, or whose price rounds to zero, is
+dropped rather than sent. The outstanding-order record keeps the *pre-snap* values,
+so the strategy's next decision compares like with like instead of churning a
+cancel/replace every tick.
+
+`order_interval_ticks` counts **that product's** ticks, not global min ticks. Spacing
+a ladder on the global unit collapses it onto one price the moment the handler snaps
+to a coarser venue grid — the strategy would believe it had a ladder the exchange
+never saw. Spacing on the real increment survives the snap: N real ticks apart before
+it, N after it, because both levels shift by the same fraction of a tick.
+
+The same grid is pushed into the order gateway, which formats the outgoing request
+against its own copy of the exchange's filters. Without that push the gateway would
+keep formatting against the copy it loaded when it was constructed, so a filter
+change mid-session would reach the snapping but not the decimal precision on the
+wire. `IOrderGateway::set_product_grid` is a defaulted no-op, so a gateway that does
+not format against a per-product grid (KIS) ignores it.
+
+A product with no `product_info` (KIS, or the window before the first message)
+simply stays on the global grid, which is the correct behaviour for a venue whose
+tick is a function of price rather than a per-product constant.
+
+### Product info is the listener's to own
+
+The listener is the process that talks to the exchange, so it is the one that can
+know the grids. `MarketListener` publishes them once at startup and then every
+`--product_info_refresh_sec` (default 300, `<= 0` for startup-only), on its own
+context and thread so a blocking REST fetch never sits in front of the broadcast
+server's work. Each message goes only to the clients subscribed to that product,
+and is replayed to each newly subscribed trader.
+
+The schedule lives in `MarketListener`, not in any adapter, because it is identical
+for every exchange; only what gets fetched differs.
+`IExchangeListener::publish_product_info()` is a defaulted no-op, so an exchange
+with nothing to publish says so by not overriding it:
+
+| exchange | overrides `publish_product_info` | why |
+|---|---|---|
+| Binance | yes — `exchangeInfo` filters | per-product tick/step size, and a filter can change |
+| KIS | no — inherits the no-op | tick size is a function of price, not a product constant |
 
 ### With the pricer
 

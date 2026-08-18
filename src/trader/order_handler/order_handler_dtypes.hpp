@@ -5,6 +5,7 @@
 #include <string>
 #include <cstdint>
 
+#include "common/market_msg_types.hpp"
 #include "trader/price_dtypes.hpp"
 #include "trader/strategy/base_strategy.hpp"
 
@@ -24,6 +25,18 @@ struct ResponseWaitingOrders {
 // Per-traded-product live state. Outstanding orders are keyed by an internal client
 // id (cid, mirroring the backtest) and mapped to the exchange order id (order_no).
 struct ProductState {
+    // This product's real grid on the venue, as last published by the listener.
+    // Absent until product_info arrives, and absent forever on an exchange that
+    // publishes none -- which is why it is optional-valued rather than a pair of
+    // doubles with a sentinel.
+    //
+    // It is used in exactly one place: snapping an order's price and quantity on the
+    // way out (OrderHandler::snap_to_product_grid). Everything else -- L1, position,
+    // outstanding orders, the strategy's own arithmetic -- stays denominated in the
+    // process-global MarketConfig units, so that this value changing mid-session
+    // cannot reinterpret state that was recorded under the old one.
+    Omni::ProductInfoData product_info;
+
     L1 l1;
     // Latest fair price from the pricer executable; left unset (NaN) until one
     // arrives, in which case the order handler prices off mid instead.

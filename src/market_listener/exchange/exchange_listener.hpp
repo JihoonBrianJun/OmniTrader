@@ -19,6 +19,19 @@ class IExchangeListener {
 
         virtual void start() = 0;
         virtual void stop() = 0;
+
+        // Fetch this exchange's per-product trading grids and enqueue one
+        // ProductInfoMsg per product. MarketListener calls this once at startup and
+        // then on --product_info_refresh_sec, always from the same thread, so an
+        // implementation needs no locking of its own.
+        //
+        // Default: nothing. An exchange with no per-product grid to query (KIS,
+        // where tick size is a function of price rather than a product constant)
+        // simply does not override it, and publishes no product_info at all. Making
+        // that a defaulted no-op rather than a pure virtual is what keeps "this
+        // exchange has no product info" a statement in the type system instead of an
+        // empty body every adapter has to remember to write.
+        virtual void publish_product_info() {}
 };
 
 } // namespace Omni::Listener

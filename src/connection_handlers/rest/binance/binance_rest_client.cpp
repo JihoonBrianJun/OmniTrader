@@ -103,6 +103,21 @@ bool BinanceRestClient::has(const std::string& product) const {
 }
 
 
+void BinanceRestClient::set_filter(
+    const std::string& product, double tick_size, double step_size
+) {
+    auto& f = filters_[product];
+    if (tick_size > 0.0) {
+        f.tick_size = tick_size;
+        f.price_precision = precision_from_step(tick_size);
+    }
+    if (step_size > 0.0) {
+        f.step_size = step_size;
+        f.qty_precision = precision_from_step(step_size);
+    }
+}
+
+
 ProductFilter BinanceRestClient::filter(const std::string& product) const {
     auto it = filters_.find(product);
     if (it != filters_.end()) return it->second;
@@ -120,7 +135,12 @@ double BinanceRestClient::round_price(const std::string& product, double price) 
 double BinanceRestClient::round_qty(const std::string& product, double qty) const {
     auto f = filter(product);
     if (f.step_size <= 0.0) return qty;
-    return std::floor(qty / f.step_size) * f.step_size;
+    // Nearest, matching round_price and the trader's own snapping. It used to floor,
+    // which silently cost a whole lot whenever the incoming value was an exact
+    // multiple of the step that `x / step` computes as a hair under the integer --
+    // 2.009 / 0.001 landing on 2008.999... and flooring to 2008. Rounding is both the
+    // intended semantics and immune to that.
+    return std::round(qty / f.step_size) * f.step_size;
 }
 
 

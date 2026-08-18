@@ -36,15 +36,30 @@ MarketListener::MarketListener(const ListenerConfig& config, quill::Logger* logg
     tcp_server_(std::make_unique<Connection::TcpServer>(
         *tcp_io_context_, logger_,
         config.broadcast_host_address, config.broadcast_port
-    ))
+    )),
+    product_info_io_context_(std::make_unique<boost::asio::io_context>())
 {
     start_tcp_server();
     adapter_ = create_exchange_listener(config_, logger_, &event_queue_);
     adapter_->start();
+    // Owned here, not by the adapter: the schedule is the same for every exchange,
+    // and only what gets fetched differs. An adapter that has nothing to publish
+    // inherits the no-op and this simply costs one idle timer.
+    start_product_info_refresh();
 }
 
 
 MarketListener::~MarketListener() {
+    // Tear the refresh down before the adapter: the timer handler calls into it.
+    if (product_info_timer_) {
+        product_info_timer_->cancel();
+    }
+    if (product_info_io_context_) {
+        product_info_io_context_->stop();
+    }
+    if (product_info_thread_.joinable()) {
+        product_info_thread_.join();
+    }
     if (adapter_) {
         adapter_->stop();
     }
@@ -69,6 +84,43 @@ void MarketListener::start_tcp_server() {
         } catch (const std::exception& e) {
             LOG_WARNING(logger_, "Exception within TCP server thread: {}", e.what());
         }
+    });
+}
+
+
+void MarketListener::start_product_info_refresh() {
+    product_info_thread_ = std::thread([this]() {
+        try {
+            // Publish once at startup whatever the interval is, so a listener running
+            // with the refresh disabled still tells its traders the grids.
+            adapter_->publish_product_info();
+            schedule_product_info_refresh();
+            product_info_io_context_->run();
+        } catch (const std::exception& e) {
+            LOG_WARNING(logger_, "Exception within product info thread: {}", e.what());
+        }
+    });
+}
+
+
+void MarketListener::schedule_product_info_refresh() {
+    if (config_.product_info_refresh_sec <= 0) return;   // startup publish only
+
+    product_info_timer_ = std::make_unique<boost::asio::steady_timer>(
+        *product_info_io_context_
+    );
+    product_info_timer_->expires_after(
+        std::chrono::seconds(config_.product_info_refresh_sec)
+    );
+    product_info_timer_->async_wait([this](const boost::system::error_code ec) {
+        if (ec) return;   // cancelled on shutdown
+        // A failed fetch must not kill the schedule: log it and try again next time.
+        try {
+            adapter_->publish_product_info();
+        } catch (const std::exception& e) {
+            LOG_WARNING(logger_, "Failed to refresh product info: {}", e.what());
+        }
+        schedule_product_info_refresh();
     });
 }
 

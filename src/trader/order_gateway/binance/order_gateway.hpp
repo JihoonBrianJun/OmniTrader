@@ -21,6 +21,12 @@ class BinanceOrderGateway : public Omni::OrderGateway::IOrderGateway {
         // reaches the same trader sink.
         void set_response_sink(Omni::OrderGateway::IOrderGateway::ResponseSink sink) override;
 
+        // Both sub-gateways format against one shared BinanceRestClient, so updating
+        // its filter cache updates the REST and WS paths together.
+        void set_product_grid(
+            const std::string& product, double tick_size, double lot_size
+        ) override;
+
         bool place_order(const Omni::OrderGateway::OrderPlaceInfo& info) override;
         bool amend_order(const Omni::OrderGateway::OrderAmendInfo& info) override;
         bool cancel_order(const Omni::OrderGateway::OrderCancelInfo& info) override;

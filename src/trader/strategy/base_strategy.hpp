@@ -15,11 +15,23 @@
 
 namespace Omni::Trader {
 
+// Process-global unit configuration. `min_tick_size` and `default_lot_size` are the
+// units every internal integer is expressed in: a price is carried as an int64 count
+// of min ticks and a quantity as an int32 count of lots, everywhere in the trader.
+//
+// They are deliberately fixed for the whole run, taken from the CLI and never
+// rewritten at runtime. A product's *real* exchange grid can move under a live
+// session (a venue can change a filter), and rebasing the normalization unit
+// underneath positions, outstanding orders and strategy limits that are already
+// denominated in it would silently reinterpret all of them. The real per-product
+// grid is applied where it actually has to be -- at order submission, see
+// OrderHandler::snap_to_product_grid -- and nowhere else.
+//
+// `default_lot_size` is named for what it is: the default quantity unit, shared by
+// every product, not any one product's lot size.
 struct MarketConfig {
     double min_tick_size;
-    double lot_size;
-    double contract_multiplier;
-    double fee_rate_bp;
+    double default_lot_size;
     std::string exchange;
     Omni::TickFunc tick_func;
     bool short_sell_unable = false;
@@ -28,13 +40,7 @@ struct MarketConfig {
         program.add_argument("--min_tick_size")
             .scan<'g', double>()
             .default_value(0.0);
-        program.add_argument("--lot_size")
-            .scan<'g', double>()
-            .default_value(0.0);
-        program.add_argument("--contract_multiplier")
-            .scan<'g', double>()
-            .default_value(1.0);
-        program.add_argument("--fee_rate_bp")
+        program.add_argument("--default_lot_size")
             .scan<'g', double>()
             .default_value(0.0);
         program.add_argument("--short_sell_unable")
@@ -43,9 +49,7 @@ struct MarketConfig {
 
     void init(const argparse::ArgumentParser& program) {
         min_tick_size = program.get<double>("--min_tick_size");
-        lot_size = program.get<double>("--lot_size");
-        contract_multiplier = program.get<double>("--contract_multiplier");
-        fee_rate_bp = program.get<double>("--fee_rate_bp");
+        default_lot_size = program.get<double>("--default_lot_size");
         exchange = program.get<std::string>("--exchange");
         tick_func = Omni::get_tick_func(exchange);
         short_sell_unable = program.get<bool>("--short_sell_unable");
@@ -66,12 +70,6 @@ public:
     BaseStrategy(const MarketConfig& market_config);
     virtual ~BaseStrategy() = default;
 
-    // Update tick/lot at runtime (e.g. once the listener publishes product info).
-    void set_market_params(double min_tick_size, double lot_size) {
-        min_tick_size_ = min_tick_size;
-        lot_size_ = lot_size;
-    }
-
     virtual void make_decision(
         const PriceInfo& price_info,
         bool do_liquidate,
@@ -84,7 +82,8 @@ public:
     ) = 0;
 
 protected:
-    double min_tick_size_, lot_size_;
+    // Copies of the process-global units; fixed for the lifetime of the strategy.
+    double min_tick_size_, default_lot_size_;
     Omni::TickFunc tick_func_;
     bool tick_func_exists_, short_sell_unable_;
 

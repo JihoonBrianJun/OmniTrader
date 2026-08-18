@@ -16,7 +16,7 @@ std::vector<double> interpolate_params(size_t param_num, double param_lb, double
 
 BaseStrategy::BaseStrategy(const MarketConfig& market_config)
 :   min_tick_size_(market_config.min_tick_size),
-    lot_size_(market_config.lot_size),
+    default_lot_size_(market_config.default_lot_size),
     tick_func_(market_config.tick_func),
     tick_func_exists_(tick_func_ != nullptr),
     short_sell_unable_(market_config.short_sell_unable)
@@ -57,7 +57,7 @@ double BaseStrategy::to_double_price(int64_t price_in_min_ticks) {
 
 
 int32_t BaseStrategy::round_qty_in_lots(double qty) {
-    return static_cast<int32_t>(std::round(qty / lot_size_));
+    return static_cast<int32_t>(std::round(qty / default_lot_size_));
 }
 
 
@@ -67,7 +67,7 @@ int32_t BaseStrategy::dollar_to_qty_in_lots(double order_dollar, double order_pr
 
 
 double BaseStrategy::to_double_qty(int32_t qty_in_lots) {
-    return static_cast<double>(qty_in_lots) * lot_size_;
+    return static_cast<double>(qty_in_lots) * default_lot_size_;
 }
 
 } // namespace Omni::Trader

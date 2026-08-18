@@ -120,11 +120,6 @@ void BinanceListener::create_user_client() {
 void BinanceListener::start() {
     running_.store(true);
 
-    // Load exchangeInfo and publish per-product trading parameters (tick/lot) so
-    // the trader can use them instead of CLI-provided values. Refreshed
-    // periodically (see schedule_product_info_refresh) since filters can change.
-    publish_product_info();
-
     io_thread_ = std::thread([this]() {
         auto work_guard = boost::asio::make_work_guard(*io_context_);
         try {
@@ -136,7 +131,6 @@ void BinanceListener::start() {
 
     worker_thread_ = std::thread([this]() { worker_loop(); });
 
-    schedule_product_info_refresh();
     create_market_client();
     if (signer_) {
         create_user_client();
@@ -206,30 +200,19 @@ void BinanceListener::schedule_keepalive() {
 }
 
 
+// Called by MarketListener, at startup and on its refresh timer -- always from that
+// one thread, which is why rest_client_'s filter cache needs no lock. filter() has
+// no other caller inside the adapter.
 void BinanceListener::publish_product_info() {
     rest_client_->load();
     for (const auto& product : futures_products_) {
         auto f = rest_client_->filter(product);
         Omni::ProductInfoMsg msg;
         msg.product = product;
-        msg.product_info_data.min_tick_size = f.tick_size;
+        msg.product_info_data.tick_size = f.tick_size;
         msg.product_info_data.lot_size = f.step_size;
         event_queue_->enqueue(std::move(msg));
     }
-}
-
-
-void BinanceListener::schedule_product_info_refresh() {
-    // <= 0 disables periodic refresh (product info still published once at start).
-    if (config_.product_info_refresh_sec <= 0) return;
-    product_info_timer_ = std::make_unique<boost::asio::steady_timer>(*io_context_);
-    product_info_timer_->expires_after(std::chrono::seconds(config_.product_info_refresh_sec));
-    product_info_timer_->async_wait([this](const boost::system::error_code ec) {
-        if (!ec && running_.load()) {
-            publish_product_info();
-            schedule_product_info_refresh();
-        }
-    });
 }
 
 

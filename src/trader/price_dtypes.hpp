@@ -17,6 +17,18 @@ struct PriceInfo {
     // none (the pricer isn't in FACTOR mode, or its fair price was unavailable and we
     // fell back to mid). Logged so a fallback is visible as such.
     double applied_factor = NAN;
+
+    // This product's real price increment on the venue, from the listener's
+    // product_info, falling back to the global --min_tick_size until one arrives.
+    // Resolved per product by the order handler, because the strategy is one shared
+    // instance and cannot hold it.
+    //
+    // A tick-based order ladder must be spaced on *this*, not on the global unit:
+    // levels one global tick apart collapse onto a single price the moment the
+    // handler snaps them to a coarser venue grid, and the strategy would believe it
+    // had a ladder the exchange never saw. Spacing on the real increment survives
+    // that snap -- N real ticks apart before it, N after it.
+    double tick_size = 0.0;
 };
 
 // Live top-of-book snapshot, maintained by the order handler straight from the

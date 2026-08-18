@@ -39,6 +39,13 @@ void BinanceOrderGateway::set_response_sink(OG::IOrderGateway::ResponseSink sink
 }
 
 
+void BinanceOrderGateway::set_product_grid(
+    const std::string& product, double tick_size, double lot_size
+) {
+    rest_client_->set_filter(product, tick_size, lot_size);
+}
+
+
 // Requests are fired without blocking; the outcome arrives later via the sink. The
 // WS gateway returns false only when it couldn't send (session down / send threw),
 // in which case we fall back to REST. A WS request that was sent but later rejected

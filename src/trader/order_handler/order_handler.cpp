@@ -38,7 +38,7 @@ OrderHandler::OrderHandler(
 :   logger_(logger),
     market_config_(market_config),
     min_tick_size_(market_config.min_tick_size),
-    lot_size_(market_config.lot_size),
+    default_lot_size_(market_config.default_lot_size),
     strategy_(strategy),
     trade_products_(config.trade_products),
     subscribe_products_(config.subscribe_products),   // already includes the trade-product fallback
@@ -49,12 +49,20 @@ OrderHandler::OrderHandler(
     fair_price_max_age_ns_(config.fair_price_max_age_ms * 1000000),
     order_update_interval_ns_(config.order_update_interval_ms * 1000000),
     order_gateway_(create_order_gateway(config, logger)),
-    product_info_ready_(market_config.min_tick_size > 0 && market_config.lot_size > 0),
     io_context_(std::make_unique<boost::asio::io_context>()),
     listener_connecting_(false),
     listener_connected_(false),
     pricer_connected_(false)
 {
+    // These are the units every internal price and quantity is a count of, so there
+    // is no usable default and no later source to fill them in from -- the listener's
+    // product_info is a different thing entirely. Fail at startup rather than divide
+    // by zero on the first book update.
+    if (min_tick_size_ <= 0.0 || default_lot_size_ <= 0.0) {
+        throw std::runtime_error(
+            "--min_tick_size and --default_lot_size must both be positive"
+        );
+    }
     for (const auto& product : trade_products_) {
         product_states_[product];
     }
@@ -96,7 +104,7 @@ int64_t OrderHandler::to_price_in_min_ticks(double price) {
 }
 
 int32_t OrderHandler::to_qty_in_lots(double qty) {
-    return static_cast<int32_t>(std::round(qty / lot_size_));
+    return static_cast<int32_t>(std::round(qty / default_lot_size_));
 }
 
 double OrderHandler::to_double_price(int64_t price_in_min_ticks) {
@@ -104,7 +112,33 @@ double OrderHandler::to_double_price(int64_t price_in_min_ticks) {
 }
 
 double OrderHandler::to_double_qty(int32_t qty_in_lots) {
-    return static_cast<double>(qty_in_lots) * lot_size_;
+    return static_cast<double>(qty_in_lots) * default_lot_size_;
+}
+
+
+bool snap_to_product_grid(
+    const Omni::ProductInfoData& info, bool /*is_bid*/, double& price, double& qty
+) {
+    // Round to the nearest grid point, for price and quantity alike: the aim is the
+    // order the strategy actually asked for, and directional rounding would bias
+    // every order away from the decided price by up to a tick and shave every size
+    // by up to a lot. `is_bid` is therefore unused, and kept only so the signature
+    // still describes the side for a venue that ever needs it.
+    //
+    // A field the listener did not publish leaves that dimension on the global grid,
+    // which is the correct behaviour for an exchange with no per-product grid to
+    // publish (KIS) as well as for the window before the first product_info arrives.
+    if (info.tick_size.has_value() && info.tick_size.value() > 0.0) {
+        double tick = info.tick_size.value();
+        price = std::round(price / tick) * tick;
+    }
+    if (info.lot_size.has_value() && info.lot_size.value() > 0.0) {
+        double lot = info.lot_size.value();
+        qty = std::round(qty / lot) * lot;
+    }
+    // A size that rounds away to nothing is not an order, and a non-positive price
+    // is never a valid limit -- drop both rather than hand them to the exchange.
+    return qty > 0.0 && price > 0.0;
 }
 
 
@@ -180,7 +214,12 @@ void OrderHandler::on_listener_subscribe(const ListenerSubscribeUpdate& /*respon
 
 
 void OrderHandler::on_orderbook(const std::string& product, const OrderbookData& data) {
-    auto& state = product_states_[product];
+    // find, not operator[]: the subscribe list is wider than the trade list, and a
+    // product we only watch must not conjure a ProductState. Every entry in this map
+    // is a product we trade, created up front in the constructor.
+    auto it = product_states_.find(product);
+    if (it == product_states_.end()) return;
+    auto& state = it->second;
     if (data.bid_book.empty() || !data.bid_book[0].price.has_value()) {
         state.l1.bbid_price_in_min_ticks = -1;
         state.l1.bbid_qty_in_lots = 0;
@@ -222,7 +261,11 @@ void OrderHandler::on_execution(const std::string& product, const ExecutionData&
     }
     if (target_product.empty()) return;
 
-    auto& state = product_states_[target_product];
+    // The fallback above can land on a product we only subscribe to; skip it rather
+    // than create a state for a product we never trade.
+    auto state_it = product_states_.find(target_product);
+    if (state_it == product_states_.end()) return;
+    auto& state = state_it->second;
     if (!have_cid) {
         auto it = state.order_no_to_cid.find(data.order_no);
         if (it != state.order_no_to_cid.end()) { cid = it->second; have_cid = true; }
@@ -399,16 +442,45 @@ std::string OrderHandler::format_positions() const {
 
 
 void OrderHandler::on_product_info(const std::string& product, const ProductInfoData& data) {
-    if (!data.min_tick_size.has_value() || !data.lot_size.has_value()) return;
-    double min_tick = data.min_tick_size.value();
+    if (!data.tick_size.has_value() || !data.lot_size.has_value()) return;
+    double tick = data.tick_size.value();
     double lot = data.lot_size.value();
-    if (min_tick <= 0 || lot <= 0) return;
+    if (tick <= 0 || lot <= 0) return;
 
-    min_tick_size_ = min_tick;
-    lot_size_ = lot;
-    strategy_->set_market_params(min_tick, lot);
-    product_info_ready_ = true;
-    LOG_INFO(logger_, "[ProductInfo] {} min_tick_size={} lot_size={}", product, min_tick, lot);
+    // Recorded against the product it describes, and nowhere else. A product we
+    // subscribe to but do not trade has no state to hold it, and needs none.
+    auto it = product_states_.find(product);
+    if (it == product_states_.end()) return;
+
+    auto& info = it->second.product_info;
+    bool changed = info.tick_size != data.tick_size || info.lot_size != data.lot_size;
+    info.tick_size = tick;
+    info.lot_size = lot;
+
+    // The gateway formats the outgoing order against its own copy of the exchange's
+    // filters, loaded once when it was constructed. Feed this one through so the
+    // rounding and the decimal precision on the wire follow the same refreshed grid
+    // the snapping above uses, instead of a snapshot taken at startup.
+    order_gateway_->set_product_grid(product, tick, lot);
+
+    // The global unit has to be able to express this product's grid. If it cannot,
+    // every internal price quantizes coarser than the venue's own increment: ladder
+    // levels one product tick apart land on the same global tick and silently become
+    // one order, and no snapping downstream can recover the levels that were already
+    // merged. Only a lower --min_tick_size fixes it, so say so loudly and once.
+    if (changed && tick < min_tick_size_) {
+        LOG_WARNING(
+            logger_,
+            "[ProductInfo] {} tick_size={} is finer than --min_tick_size={}; prices "
+            "quantize coarser than the venue grid and tick-based ladders will merge. "
+            "Lower --min_tick_size to {} or below.",
+            product, tick, min_tick_size_, tick
+        );
+    }
+
+    if (changed) {
+        LOG_INFO(logger_, "[ProductInfo] {} tick_size={} lot_size={}", product, tick, lot);
+    }
 }
 
 
@@ -431,6 +503,11 @@ void OrderHandler::build_price_info(const ProductState& state, PriceInfo& price_
     price_info.bbid_price_in_min_ticks = state.l1.bbid_price_in_min_ticks;
     price_info.bask_price_in_min_ticks = state.l1.bask_price_in_min_ticks;
     price_info.applied_factor = NAN;
+
+    // Set before any early return, so the strategy never sees an unset increment.
+    // min_tick_size_ is guaranteed positive by the constructor, so this always is.
+    double product_tick = state.product_info.tick_size.value_or(0.0);
+    price_info.tick_size = product_tick > 0.0 ? product_tick : min_tick_size_;
 
     if ((state.l1.bbid_price_in_min_ticks == -1) || (state.l1.bask_price_in_min_ticks == -1)) {
         // No two-sided book yet: leave both prices NaN so the caller skips the
@@ -497,9 +574,22 @@ void OrderHandler::update_orders(const std::string& product) {
         return;
     }
 
-    // Wait until tick/lot are known (from listener product info or CLI fallback).
-    if (!product_info_ready_) {
-        LOG_INFO(logger_, "[Decision] {} skipped: product info (tick/lot) not ready", product);
+    // Do not quote until this product's real tick is known. Everything the strategy
+    // steps by one tick -- the caps that hold a quote inside the touch, the
+    // liquidation prices, the ladder spacing -- would otherwise fall back to the
+    // global --min_tick_size. That is a normalization unit, deliberately set far
+    // finer than any venue grid, so the caps would shrink to nothing and a quote
+    // meant to be passive would cross the spread.
+    //
+    // Exempt when the exchange has a tick_func: there the increment is computed from
+    // price and needs no product_info, and such a venue publishes none, so gating on
+    // product_info alone would stop it trading at all.
+    if (!market_config_.tick_func && !state.product_info.tick_size.has_value()) {
+        LOG_INFO(
+            logger_, "[Decision] {} skipped: product tick not known yet "
+            "(no product_info from the listener, and this exchange has no tick_func)",
+            product
+        );
         return;
     }
 
@@ -593,10 +683,29 @@ void OrderHandler::update_orders(const std::string& product) {
 
     auto submit_place = [&](bool is_bid, int64_t price_in_min_ticks, int32_t qty_in_lots) {
         if (qty_in_lots <= 0) return;
+
+        // The one point where the product's real grid is applied. Everything above
+        // this line is in global units; everything the exchange sees is snapped.
+        double price = to_double_price(price_in_min_ticks);
+        double qty = to_double_qty(qty_in_lots);
+        if (!snap_to_product_grid(state.product_info, is_bid, price, qty)) {
+            LOG_INFO(
+                logger_, "[Order Place] {} is_bid={} px={} skipped: qty rounds to zero on product grid",
+                product, is_bid, price
+            );
+            return;
+        }
+
         uint64_t cid = reserve_cid(product);
         // Register optimistically so the strategy won't re-issue the order while we
         // await the ack; the order_no is bound on the reply/execution, and the order
         // is dropped again if the place fails.
+        //
+        // Recorded in global units -- the pre-snap values the strategy asked for, not
+        // the post-snap ones sent. choose_orders_to_cancel matches this against the
+        // strategy's next set of desired prices, which are computed on the same grid;
+        // storing the snapped price would make an order it still wants look like one
+        // it does not, and churn a cancel/replace every tick.
         state.outstanding_orders[cid] = OutstandingOrder{
             .price_in_min_ticks = price_in_min_ticks,
             .qty_in_lots = qty_in_lots,
@@ -606,8 +715,8 @@ void OrderHandler::update_orders(const std::string& product) {
         Omni::OrderGateway::OrderPlaceInfo info{
             .is_limit = true,
             .is_bid = is_bid,
-            .price = to_double_price(price_in_min_ticks),
-            .qty = to_double_qty(qty_in_lots),
+            .price = price,
+            .qty = qty,
             .product = product,
             .cid = cid
         };

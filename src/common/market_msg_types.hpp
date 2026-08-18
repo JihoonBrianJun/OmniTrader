@@ -126,11 +126,18 @@ struct PositionMsg {
     PositionData position_data = {};
 };
 
-// Per-product trading parameters published by the listener (Binance: from
-// exchangeInfo filters; other exchanges may omit). The trader uses these instead
-// of CLI-provided tick/lot.
+// A product's real trading grid on the venue, published by the listener: it is the
+// process that talks to the exchange, so it is the one that can know it. Binance
+// fills these in from exchangeInfo filters and refreshes them on an interval, since
+// a venue can change a filter under a running session; exchanges without a
+// per-product grid endpoint (KIS) publish nothing and the field stays absent.
+//
+// Named `tick_size`, not `min_tick_size`, because it is a different thing from the
+// trader's process-global --min_tick_size: that one is the unit the trader
+// normalizes every price into, this one is the increment the venue will actually
+// accept. The trader applies these only when submitting an order.
 struct ProductInfoData {
-    std::optional<double> min_tick_size = std::nullopt;
+    std::optional<double> tick_size = std::nullopt;
     std::optional<double> lot_size = std::nullopt;
 };
 struct ProductInfoMsg {

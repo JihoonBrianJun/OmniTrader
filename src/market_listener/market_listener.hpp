@@ -10,6 +10,7 @@
 #include <quill/LogMacros.h>
 #include <moodycamel/blockingconcurrentqueue.h>
 #include <boost/asio.hpp>
+#include <boost/asio/steady_timer.hpp>
 
 #include "loggers/csv_logger.hpp"
 #include "connection_handlers/tcp/tcp_server.hpp"
@@ -39,10 +40,20 @@ class MarketListener {
 
         std::unique_ptr<IExchangeListener> adapter_;
 
+        // Drives the adapter's periodic product-info refresh. On its own context and
+        // thread so the fetch -- a blocking REST call inside the adapter -- can never
+        // sit in front of the broadcast server's work, and so every
+        // publish_product_info call is made from one and the same thread.
+        std::unique_ptr<boost::asio::io_context> product_info_io_context_;
+        std::unique_ptr<boost::asio::steady_timer> product_info_timer_;
+        std::thread product_info_thread_;
+
         std::map<std::string, std::shared_ptr<Logger::CsvLogger<OrderbookCsvSchema>>> orderbook_loggers_;
         std::map<std::string, std::shared_ptr<Logger::CsvLogger<TradeCsvSchema>>> trade_loggers_;
 
         void start_tcp_server();
+        void start_product_info_refresh();
+        void schedule_product_info_refresh();
 
         template<typename T>
         void broadcast_market_data(const T& msg) {

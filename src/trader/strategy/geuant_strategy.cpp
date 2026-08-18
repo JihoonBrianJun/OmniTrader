@@ -104,14 +104,31 @@ void GeuantStrategy::make_decision(
 ) {
     if (std::isnan(price_info.mid_price)) return;
 
+    // "One tick" means one of *this product's* ticks everywhere below: the caps that
+    // hold a quote inside the touch, the liquidation prices, and the ladder spacing.
+    // Stepping by the global min tick instead shrinks every one of those steps to
+    // nothing as --min_tick_size is made finer -- the "one tick inside the ask" cap
+    // becomes "at the ask", and a quote meant to be passive crosses the spread.
+    //
+    // tick_func wins where it exists (a venue whose increment is a function of price
+    // rather than a per-product constant). The global unit is the last resort, for
+    // the window before any product_info has arrived.
+    const auto local_tick_size = tick_func_exists_
+        ? tick_func_(price_info.fair_price)
+        : (price_info.tick_size > 0.0 ? price_info.tick_size : min_tick_size_);
+
     if (do_liquidate) {
         if (position_in_lots > 0) {
             ask_place_orders[
-                floor_price_in_min_ticks(to_double_price(price_info.bask_price_in_min_ticks-1))
+                floor_price_in_min_ticks(
+                    to_double_price(price_info.bask_price_in_min_ticks) - local_tick_size
+                )
             ] = position_in_lots;
         } else if (position_in_lots < 0) {
             bid_place_orders[
-                ceil_price_in_min_ticks(to_double_price(price_info.bbid_price_in_min_ticks+1))
+                ceil_price_in_min_ticks(
+                    to_double_price(price_info.bbid_price_in_min_ticks) + local_tick_size
+                )
             ] = -position_in_lots;
         }
 
@@ -125,12 +142,16 @@ void GeuantStrategy::make_decision(
         ? floor_price_in_min_ticks(
             to_double_price(price_info.bbid_price_in_min_ticks) * (1.0 - params_.bbo_cap_buffer_bp / 10000.0)
         )
-        : floor_price_in_min_ticks(to_double_price(price_info.bask_price_in_min_ticks-1));
+        : floor_price_in_min_ticks(
+            to_double_price(price_info.bask_price_in_min_ticks) - local_tick_size
+          );
     auto ask_price_limit_in_min_ticks = params_.use_bbo_cap_buffer
         ? ceil_price_in_min_ticks(
             to_double_price(price_info.bask_price_in_min_ticks) * (1.0 + params_.bbo_cap_buffer_bp / 10000.0)
         )
-        : ceil_price_in_min_ticks(to_double_price(price_info.bbid_price_in_min_ticks+1));
+        : ceil_price_in_min_ticks(
+            to_double_price(price_info.bbid_price_in_min_ticks) + local_tick_size
+          );
 
     auto bid_qty_limit_in_lots = params_.position_in_dollar
         ? (dollar_to_qty_in_lots(params_.position_limit_in_dollar, price_info.mid_price) - position_in_lots)
@@ -149,10 +170,9 @@ void GeuantStrategy::make_decision(
     auto base_delta_ask = delta_ask(position_limit_usage);
 
     for (size_t order_idx = 0; order_idx < params_.order_num; ++order_idx) {
+        // order_interval_ticks likewise counts this product's ticks.
         auto price_offset = ((order_idx >= 1) && params_.tick_based_order_interval)
-            ? static_cast<double>(order_idx * params_.order_interval_ticks) * (
-                tick_func_exists_ ? tick_func_(price_info.fair_price) : min_tick_size_
-            )
+            ? static_cast<double>(order_idx * params_.order_interval_ticks) * local_tick_size
             : price_info.fair_price * static_cast<double>(order_idx) * params_.order_interval_bp / 10000.0;
 
         if (bid_qty_limit_in_lots > 0) {

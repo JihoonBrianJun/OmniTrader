@@ -46,6 +46,9 @@ int main(int argc, char* argv[]) {
     auto logger_obj = std::make_unique<Omni::Logger::LoggerObj>("trader", config.log_path);
     auto logger = logger_obj->create_or_get_logger();
 
+    // The process-global price/quantity units. Fixed for the run: everything
+    // internal is a count of these, and the listener's per-product grids are applied
+    // only when an order goes out.
     Omni::Trader::MarketConfig market_config;
     market_config.init(program);
 
@@ -55,9 +58,17 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    auto order_handler = std::make_unique<Omni::Trader::OrderHandler>(
-        market_config, strategy, config, logger
-    );
+    std::unique_ptr<Omni::Trader::OrderHandler> order_handler;
+    try {
+        order_handler = std::make_unique<Omni::Trader::OrderHandler>(
+            market_config, strategy, config, logger
+        );
+    } catch (const std::exception& e) {
+        // Misconfiguration (e.g. missing --min_tick_size/--default_lot_size) should
+        // read as an error, not an abort trace.
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
 
     while (
         config.market_end_intraday_minute < 0 ||
