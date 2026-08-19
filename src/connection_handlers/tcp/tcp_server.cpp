@@ -1,4 +1,5 @@
 #include <iostream>
+#include <chrono>
 #include <sstream>
 #include <algorithm>
 #include <glaze/glaze.hpp>
@@ -94,29 +95,37 @@ void TcpSession::do_write() {
         return;
     }
 
-    std::string message;
-    if (write_queue_.try_dequeue(message)) {
-        auto self(shared_from_this());
-        boost::asio::async_write(
-            socket_,
-            boost::asio::buffer(message + "\n"),
-            [this, self](boost::system::error_code ec, std::size_t /*length*/) {
-                if (!ec && active_.load()) {
-                    std::string next_message;
-                    if (write_queue_.try_dequeue(next_message)) {
-                        do_write();
-                    } else {
-                        writing_.store(false);
-                    }
-                } else {
-                    writing_.store(false);
-                    close();
-                }
-            }
-        );
-    } else {
+    if (!write_queue_.try_dequeue(write_buffer_)) {
         writing_.store(false);
+        return;
     }
+    write_buffer_ += '\n';
+
+    // Write out of write_buffer_, a member, rather than a temporary: async_write
+    // returns immediately and only refers to the buffer while the operation is in
+    // flight, so a `message + "\n"` temporary would be destroyed before the bytes
+    // were ever sent. Only ever touched on the socket's executor (do_write is
+    // reached from the post in send_message and from this completion handler,
+    // both of which run there), so it needs no synchronization.
+    auto self(shared_from_this());
+    boost::asio::async_write(
+        socket_,
+        boost::asio::buffer(write_buffer_),
+        [this, self](boost::system::error_code ec, std::size_t /*length*/) {
+            if (!ec && active_.load()) {
+                // Chain straight into the next write. The previous version
+                // dequeued here to *test* for a next message and then called
+                // do_write(), which dequeued again -- so every second message on
+                // a session was silently discarded. A subscriber that was sent
+                // both a subscribe ack and the retained product_info received
+                // only one of the two, at random.
+                do_write();
+            } else {
+                writing_.store(false);
+                close();
+            }
+        }
+    );
 }
 
 
@@ -210,20 +219,28 @@ void TcpServer::start() {
 
 
 void TcpServer::stop() {
-    running_.store(false);
+    // Idempotent: the destructor calls stop() too, and so may the owner.
+    if (!running_.exchange(false)) return;
 
     boost::system::error_code ec;
     acceptor_.close(ec);
+
+    // Join the worker *before* touching the session maps. They belong to the
+    // worker thread alone -- every mutation of them goes through a task, which is
+    // why they carry no lock -- and stop() runs on another thread. The previous
+    // order walked and cleared them while the worker could still be inside a task
+    // mutating the same maps, which corrupted them and surfaced as a bad_weak_ptr
+    // out of TcpSession::close(). Once the worker is joined this is single
+    // threaded and safe.
+    if (task_thread_.joinable()) {
+        task_thread_.join();
+    }
 
     for (auto& [session, products] : session_to_products_) {
         session->close();
     }
     session_to_products_.clear();
     product_to_sessions_.clear();
-
-    if (task_thread_.joinable()) {
-        task_thread_.join();
-    }
 }
 
 
@@ -293,7 +310,11 @@ void TcpServer::do_accept() {
 void TcpServer::broadcast_worker() {
     while (running_.load()) {
         ServerTask task;
-        task_queue_.wait_dequeue(task);
+        // Timed, so shutdown does not depend on another task happening to arrive
+        // to wake this thread up: stop() clears running_ and then joins.
+        if (!task_queue_.wait_dequeue_timed(task, std::chrono::milliseconds(100))) {
+            continue;
+        }
 
         std::visit(overloaded{
             [&](const SessionCommand& cmd) {

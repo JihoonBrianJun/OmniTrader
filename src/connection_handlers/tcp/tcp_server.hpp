@@ -47,6 +47,10 @@ class TcpSession : public std::enable_shared_from_this<TcpSession> {
         std::string read_message_;
 
         moodycamel::BlockingConcurrentQueue<std::string> write_queue_;
+        // The in-flight write's bytes. async_write only refers to the buffer it is
+        // given, so it has to outlive the call; held here and only ever touched on
+        // the socket's executor.
+        std::string write_buffer_;
         std::atomic<bool> writing_, active_;
 };
 
