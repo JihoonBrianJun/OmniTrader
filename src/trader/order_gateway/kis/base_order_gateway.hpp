@@ -6,6 +6,7 @@
 
 #include "config_handlers/kis/kis_config.hpp"
 #include "trader/order_gateway/order_gateway.hpp"
+#include "utils/task_runner.hpp"
 
 
 namespace Omni::KIS::OrderGateway {
@@ -17,7 +18,13 @@ namespace OG = Omni::OrderGateway;
 class BaseOrderGateway : public OG::IOrderGateway {
     public:
         BaseOrderGateway(quill::Logger* logger, const std::string& http_domain);
-        ~BaseOrderGateway() override = default;
+
+        // Drains as a last resort. It is NOT enough on its own: the dispatched tasks
+        // call parse_order_response, which is pure virtual here, and by the time a
+        // base destructor runs the override is already gone. Every concrete gateway
+        // must call drain_pending() in its own destructor -- this one only catches the
+        // case where one forgot, and by then the vtable is already the base's.
+        ~BaseOrderGateway() override;
 
         void get_balances(std::vector<std::string>& balance_responses);
 
@@ -31,6 +38,26 @@ class BaseOrderGateway : public OG::IOrderGateway {
 
     protected:
         quill::Logger* logger_;
+
+        // One worker, running requests in the order they were posted. KIS is
+        // REST-only, so leaving these synchronous meant the trader thread sat inside
+        // curl for the whole round trip on every single order.
+        Omni::SerialTaskRunner runner_;
+
+        // Wait for in-flight order requests. Call this first thing in the destructor
+        // of any class deriving from this one; see ~BaseOrderGateway.
+        void drain_pending() { runner_.drain(); }
+
+        // Report a request that never left as a failed response, so the trader stops
+        // waiting on a reply that is not coming.
+        void deliver_dispatch_failure(uint64_t cid);
+
+        // Shared body of place/amend/cancel: queue one POST on the gateway's worker
+        // and deliver the parsed reply from there. `what` only labels the log line.
+        bool send_order_request(
+            const std::string& what, std::string url, std::string params,
+            std::map<std::string, std::string> headers, uint64_t cid
+        );
 
         Config::AccountInfo account_info_;
         std::string http_domain_, balance_url_, order_place_url_, order_change_url_;

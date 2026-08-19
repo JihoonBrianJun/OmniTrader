@@ -259,7 +259,7 @@ behind, which is the operator's call to make.
 | Setting | Default | What it does |
 | --- | --- | --- |
 | `flatten_on_shutdown` | `true` | Off = cancel only, leave the position on. |
-| `shutdown_cancel_timeout_ms` | `3000` | How long to chase cancel acks. |
+| `shutdown_cancel_timeout_ms` | `5000` | How long to chase cancel acks. Cancels go out one at a time (see below), so this scales with how many orders are resting. |
 | `shutdown_flatten_timeout_ms` | `5000` | How long to work the position passively before crossing. |
 | `shutdown_market_flatten` | `true` | Off = never cross; exit with the residual and say so. |
 | `shutdown_reduce_only` | `true` | Tags the flattening orders `reduceOnly`. **Turn off for a Binance futures account in Hedge Mode**, which rejects the flag. |
@@ -267,6 +267,13 @@ behind, which is the operator's call to make.
 On the CLI the three defaults-on switches are `--no_flatten_on_shutdown`,
 `--no_shutdown_market_flatten` and `--no_shutdown_reduce_only`, since a flag can only
 turn something on; in JSON they are stated positively.
+
+Orders leave a gateway **in the order the trader issued them**: the WS-API gateway
+writes to one socket, and the REST gateways run one worker thread rather than a thread
+per request. That is what makes cancel-then-place safe -- a place that overtook its
+cancel would rest at both prices at once. The cost is that a burst of REST requests
+costs one round trip each rather than overlapping, which is why the cancel timeout
+above is sized the way it is.
 
 **Stop the trader before the listener.** Position and fills both reach the trader over
 the listener link, so with the listener already gone the trader cannot work the

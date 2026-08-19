@@ -70,7 +70,9 @@ struct TraderConfig {
     // business staying live. Flattening is a position decision, so it is a switch.
     bool flatten_on_shutdown = true;
     // How long to keep chasing cancel acks before giving up and logging what is left.
-    long shutdown_cancel_timeout_ms = 3000;
+    // Sized for the slow path: a gateway sends its requests one at a time to keep them
+    // in order, so cancelling N resting orders over REST costs N round trips, not one.
+    long shutdown_cancel_timeout_ms = 5000;
     // How long to work the position passively (the strategy's liquidation quote, one
     // tick inside the touch) before falling back to a market order.
     long shutdown_flatten_timeout_ms = 5000;
@@ -118,7 +120,7 @@ struct TraderConfig {
         // --no_... flags so the safe behaviour needs no argument to get.
         program.add_argument("--no_flatten_on_shutdown").flag();
         program.add_argument("--shutdown_cancel_timeout_ms")
-            .scan<'i', int64_t>().default_value(int64_t{3000});
+            .scan<'i', int64_t>().default_value(int64_t{5000});
         program.add_argument("--shutdown_flatten_timeout_ms")
             .scan<'i', int64_t>().default_value(int64_t{5000});
         program.add_argument("--no_shutdown_market_flatten").flag();

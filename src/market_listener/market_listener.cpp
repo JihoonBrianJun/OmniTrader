@@ -93,7 +93,23 @@ void MarketListener::start_product_info_refresh() {
         try {
             // Publish once at startup whatever the interval is, so a listener running
             // with the refresh disabled still tells its traders the grids.
-            adapter_->publish_product_info();
+            //
+            // Guarded separately from the loop below: a throw here used to take the
+            // whole thread with it, so the refresh timer was never armed and the
+            // listener ran for the rest of the session with no product info at all.
+            // That is not a small outage -- a trader will not quote a product whose
+            // real tick it does not know, so one failed exchangeInfo call at startup
+            // silently stopped trading until someone restarted the listener. Log it
+            // and let the schedule below pick it up on the next tick instead.
+            try {
+                adapter_->publish_product_info();
+            } catch (const std::exception& e) {
+                LOG_ERROR(
+                    logger_,
+                    "Initial product info fetch failed: {}; retrying on the refresh timer",
+                    e.what()
+                );
+            }
             schedule_product_info_refresh();
             product_info_io_context_->run();
         } catch (const std::exception& e) {

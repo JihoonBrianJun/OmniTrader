@@ -11,11 +11,33 @@
 
 namespace Omni::KIS::OrderGateway {
 
+// Whole-transfer cap for an order request. Much tighter than the RestClient
+// default: the trader is waiting on the reply and the shutdown drain waits on any
+// request still running, so a stuck order has to fail fast rather than hang.
+static constexpr long ORDER_REST_TIMEOUT_SEC = 5;
+
+
 BaseOrderGateway::BaseOrderGateway(quill::Logger* logger, const std::string& http_domain)
 :   logger_(logger),
+    runner_(logger, "kis rest order gateway"),
     account_info_(Config::get_account_info().second),
     http_domain_(http_domain)
 {
+}
+
+
+BaseOrderGateway::~BaseOrderGateway() {
+    // Last resort only -- by now parse_order_response resolves to the pure virtual.
+    // The concrete gateway is expected to have drained already; see the header.
+    if (runner_.pending() > 0) {
+        LOG_ERROR(
+            logger_,
+            "{} KIS order request(s) still queued in ~BaseOrderGateway: the concrete "
+            "gateway did not call drain_pending()",
+            runner_.pending()
+        );
+    }
+    runner_.drain();
 }
 
 
@@ -80,74 +102,84 @@ void BaseOrderGateway::get_balances(std::vector<std::string>& balance_responses)
 }
 
 
-// KIS REST is synchronous: run the HTTP call, then deliver the parsed response
-// (tagged with the order's cid) inline through the sink, matching the async contract.
+void BaseOrderGateway::deliver_dispatch_failure(uint64_t cid) {
+    OG::OrderResponse response;
+    response.cid = cid;
+    response.success = false;
+    response.msg = "KIS REST order could not be queued";
+    deliver(response);
+}
+
+
+// KIS is REST-only, so every order is a blocking HTTP round trip. Each one is queued
+// on the gateway's single worker and the parsed response (tagged with the order's cid)
+// is delivered through the sink from there, which is what the IOrderGateway contract
+// describes. One worker means the venue sees the requests in the order they were made.
+//
+// The params and headers are built here, on the caller's thread, and captured by
+// value: they read members that the caller still owns, and the task outlives the call.
+bool BaseOrderGateway::send_order_request(
+    const std::string& what, std::string url, std::string params,
+    std::map<std::string, std::string> headers, uint64_t cid
+) {
+    bool queued = runner_.post(
+        [this, what, url = std::move(url), params = std::move(params),
+         headers = std::move(headers), cid]() {
+            auto client = std::make_shared<Omni::Connection::RestClient>(logger_);
+            client->set_timeout_sec(ORDER_REST_TIMEOUT_SEC);
+            auto response = client->post(url, params, headers);
+
+            OG::OrderResponse order_response;
+            order_response.cid = cid;
+            if (response.success && (response.status_code == 200)) {
+                parse_order_response(response.body, order_response);
+            } else {
+                LOG_WARNING(
+                    logger_, "{} order failed: {} {} {}",
+                    what, response.error_msg, response.status_code, response.body
+                );
+                order_response.msg = response.body;
+            }
+            deliver(order_response);
+        }
+    );
+
+    if (!queued) {
+        deliver_dispatch_failure(cid);
+        return false;
+    }
+    return true;
+}
+
+
 bool BaseOrderGateway::place_order(const OG::OrderPlaceInfo& order_place_info) {
     std::string order_place_params;
     write_order_place_params(order_place_params, order_place_info);
-
-    auto client = std::make_shared<Omni::Connection::RestClient>(logger_);
-    auto response = client->post(
-        order_place_url_, order_place_params,
-        order_place_info.is_bid ? bid_order_place_header_ : ask_order_place_header_
+    return send_order_request(
+        "Place", order_place_url_, std::move(order_place_params),
+        order_place_info.is_bid ? bid_order_place_header_ : ask_order_place_header_,
+        order_place_info.cid
     );
-
-    OG::OrderResponse place_order_response;
-    place_order_response.cid = order_place_info.cid;
-    if (response.success && (response.status_code == 200)) {
-        parse_order_response(response.body, place_order_response);
-    } else {
-        LOG_WARNING(
-            logger_, "Place order failed: {} {} {}",
-            response.error_msg, response.status_code, response.body
-        );
-    }
-    deliver(place_order_response);
-    return true;
 }
 
 
 bool BaseOrderGateway::amend_order(const OG::OrderAmendInfo& order_amend_info) {
     std::string order_amend_params;
     write_order_amend_params(order_amend_params, order_amend_info);
-
-    auto client = std::make_shared<Omni::Connection::RestClient>(logger_);
-    auto response = client->post(order_change_url_, order_amend_params, order_change_header_);
-
-    OG::OrderResponse amend_order_response;
-    amend_order_response.cid = order_amend_info.cid;
-    if (response.success && (response.status_code == 200)) {
-        parse_order_response(response.body, amend_order_response);
-    } else {
-        LOG_WARNING(
-            logger_, "Amend order failed: {} {} {}",
-            response.error_msg, response.status_code, response.body
-        );
-    }
-    deliver(amend_order_response);
-    return true;
+    return send_order_request(
+        "Amend", order_change_url_, std::move(order_amend_params),
+        order_change_header_, order_amend_info.cid
+    );
 }
 
 
 bool BaseOrderGateway::cancel_order(const OG::OrderCancelInfo& order_cancel_info) {
     std::string order_cancel_params;
     write_order_cancel_params(order_cancel_params, order_cancel_info);
-
-    auto client = std::make_shared<Omni::Connection::RestClient>(logger_);
-    auto response = client->post(order_change_url_, order_cancel_params, order_change_header_);
-
-    OG::OrderResponse cancel_order_response;
-    cancel_order_response.cid = order_cancel_info.cid;
-    if (response.success && (response.status_code == 200)) {
-        parse_order_response(response.body, cancel_order_response);
-    } else {
-        LOG_WARNING(
-            logger_, "Cancel order failed: {} {} {}",
-            response.error_msg, response.status_code, response.body
-        );
-    }
-    deliver(cancel_order_response);
-    return true;
+    return send_order_request(
+        "Cancel", order_change_url_, std::move(order_cancel_params),
+        order_change_header_, order_cancel_info.cid
+    );
 }
 
 

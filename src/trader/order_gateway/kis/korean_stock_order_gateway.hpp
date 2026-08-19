@@ -7,6 +7,11 @@ class KoreanStockOrderGateway : public BaseOrderGateway {
     public:
         KoreanStockOrderGateway(quill::Logger* logger, const std::string& http_domain);
 
+        // Drains the in-flight order requests while this object is still whole. They
+        // call parse_order_response, overridden below, so waiting for them in the base
+        // destructor would be too late -- the override would already be gone.
+        ~KoreanStockOrderGateway() override { drain_pending(); }
+
         void parse_order_response(
             const std::string& order_response, OG::OrderResponse& parsed_response
         ) override;

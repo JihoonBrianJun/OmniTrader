@@ -121,7 +121,7 @@ RestResponse RestClient::perform(
         curl_easy_setopt(curl_, CURLOPT_WRITEDATA, &response_body);
         curl_easy_setopt(curl_, CURLOPT_HEADERFUNCTION, header_callback);
         curl_easy_setopt(curl_, CURLOPT_HEADERDATA, &response_headers);
-        curl_easy_setopt(curl_, CURLOPT_TIMEOUT, 30L);
+        curl_easy_setopt(curl_, CURLOPT_TIMEOUT, timeout_sec_);
 
         CURLcode res = curl_easy_perform(curl_);
 

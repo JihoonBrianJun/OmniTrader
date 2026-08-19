@@ -39,12 +39,19 @@ class RestClient {
             const std::map<std::string, std::string>& headers = {}
         );
 
+        // Whole-transfer timeout for subsequent calls on this client. The 30 s
+        // default suits a bulk fetch (exchangeInfo, a depth snapshot); an order does
+        // not, since the caller is waiting on it and a shutdown drain waits on the
+        // caller. The order gateways set a much tighter bound.
+        void set_timeout_sec(long seconds) { timeout_sec_ = seconds > 0 ? seconds : 1; }
+
         // RFC-3986 percent-encoding (used when building signed query strings).
         static std::string url_encode(const std::string& value);
 
     private:
         quill::Logger* logger_;
         CURL* curl_;
+        long timeout_sec_ = 30;
 
         RestResponse perform(
             const std::string& method,

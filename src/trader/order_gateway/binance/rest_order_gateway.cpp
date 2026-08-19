@@ -10,6 +10,11 @@
 
 namespace Omni::Binance {
 
+// Whole-transfer cap for an order request. Well under the RestClient default: the
+// trader is blocked on the reply's bookkeeping and the shutdown drain waits on any
+// request still running, so a stuck order must fail fast rather than hang.
+static constexpr long ORDER_REST_TIMEOUT_SEC = 5;
+
 RestOrderGateway::RestOrderGateway(
     quill::Logger* logger,
     const std::string& rest_domain,
@@ -19,50 +24,85 @@ RestOrderGateway::RestOrderGateway(
 :   logger_(logger),
     rest_domain_(rest_domain),
     signer_(std::move(signer)),
-    rest_client_(std::move(rest_client))
+    rest_client_(std::move(rest_client)),
+    runner_(logger, "binance rest order gateway")
 {
 }
 
 
-void RestOrderGateway::send_order(
-    const std::string& method, const std::string& params, uint64_t cid
-) {
+RestOrderGateway::~RestOrderGateway() {
+    runner_.drain();
+}
+
+
+void RestOrderGateway::deliver_dispatch_failure(uint64_t cid, const std::string& why) {
     OG::OrderResponse response;
     response.cid = cid;
+    response.success = false;
+    response.msg = why;
+    deliver(response);
+}
+
+
+bool RestOrderGateway::send_order(
+    const std::string& method, std::string params, uint64_t cid
+) {
     if (!signer_) {
         LOG_WARNING(logger_, "No signer for Binance REST order");
-        deliver(response);
-        return;
+        deliver_dispatch_failure(cid, "no signer");
+        return false;
     }
+
+    // Signed here, on the caller's thread, so the timestamp is the moment the trader
+    // decided rather than whenever a thread happened to get scheduled -- recvWindow is
+    // measured against it.
     auto full_params = fmt::format(
         "{}&timestamp={}&recvWindow={}", params, get_curr_tstamp_ms(), DEFAULT_RECV_WINDOW
     );
     auto url = fmt::format("{}/fapi/v1/order?{}", rest_domain_, sign_query(*signer_, full_params));
+    auto headers = auth_header(*signer_);
 
-    auto client = std::make_shared<Omni::Connection::RestClient>(logger_);
-    Omni::Connection::RestResponse http;
-    if (method == "POST") http = client->post(url, "", auth_header(*signer_));
-    else if (method == "PUT") http = client->put(url, "", auth_header(*signer_));
-    else http = client->del(url, auth_header(*signer_));
+    // Everything the task needs is captured by value: the caller returns immediately
+    // and its locals are gone by the time this runs.
+    bool queued = runner_.post([this, method, url, headers, cid]() {
+        OG::OrderResponse response;
+        response.cid = cid;
 
-    if (!http.success || http.status_code != 200) {
-        LOG_WARNING(
-            logger_, "Binance REST {} order failed: {} {} {}",
-            method, http.error_msg, http.status_code, http.body
-        );
-        response.success = false;
-        response.msg = http.body;
+        auto client = std::make_shared<Omni::Connection::RestClient>(logger_);
+        // An order is not a bulk fetch: the trader is waiting on the reply and the
+        // shutdown drain is waiting on the trader.
+        client->set_timeout_sec(ORDER_REST_TIMEOUT_SEC);
+
+        Omni::Connection::RestResponse http;
+        if (method == "POST") http = client->post(url, "", headers);
+        else if (method == "PUT") http = client->put(url, "", headers);
+        else http = client->del(url, headers);
+
+        if (!http.success || http.status_code != 200) {
+            LOG_WARNING(
+                logger_, "Binance REST {} order failed: {} {} {}",
+                method, http.error_msg, http.status_code, http.body
+            );
+            response.success = false;
+            response.msg = http.body;
+            deliver(response);
+            return;
+        }
+
+        response.success = true;
+        RestOrderResponse parsed;
+        constexpr glz::opts read_opts{.format = glz::JSON, .error_on_unknown_keys = false};
+        if (!glz::read<read_opts>(parsed, http.body) && parsed.orderId != 0) {
+            response.order_no = std::to_string(parsed.orderId);
+        }
         deliver(response);
-        return;
-    }
+    });
 
-    response.success = true;
-    RestOrderResponse parsed;
-    constexpr glz::opts read_opts{.format = glz::JSON, .error_on_unknown_keys = false};
-    if (!glz::read<read_opts>(parsed, http.body) && parsed.orderId != 0) {
-        response.order_no = std::to_string(parsed.orderId);
+    if (!queued) {
+        deliver_dispatch_failure(cid, "REST order could not be queued");
+        return false;
     }
-    deliver(response);
+    return true;
 }
 
 
@@ -79,8 +119,7 @@ bool RestOrderGateway::place_order(const OG::OrderPlaceInfo& info) {
     }
     // See the WS gateway: reduceOnly is valid in One-way mode only, so it is opt-in.
     if (info.reduce_only) params += "&reduceOnly=true";
-    send_order("POST", params, info.cid);
-    return true;
+    return send_order("POST", std::move(params), info.cid);
 }
 
 
@@ -92,15 +131,13 @@ bool RestOrderGateway::amend_order(const OG::OrderAmendInfo& info) {
         rest_client_->format_qty(info.product, info.qty),
         rest_client_->format_price(info.product, info.price)
     );
-    send_order("PUT", params, info.cid);
-    return true;
+    return send_order("PUT", std::move(params), info.cid);
 }
 
 
 bool RestOrderGateway::cancel_order(const OG::OrderCancelInfo& info) {
     std::string params = fmt::format("symbol={}&orderId={}", info.product, info.order_no);
-    send_order("DELETE", params, info.cid);
-    return true;
+    return send_order("DELETE", std::move(params), info.cid);
 }
 
 } // namespace Omni::Binance

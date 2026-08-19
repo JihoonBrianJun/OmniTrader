@@ -107,6 +107,15 @@ OrderHandler::~OrderHandler() {
     // has; the owner calls shutdown() first, on every exit path, and this only tears
     // the links down.
     shutting_down_.store(true, std::memory_order_relaxed);
+
+    // First, and explicitly. The REST gateways run each order on a thread of their
+    // own and deliver the reply through the response sink, which enqueues onto
+    // trader_queue_. Destroying the gateway drains those threads; leaving it to the
+    // member teardown order would destroy trader_queue_ first (it is declared after
+    // order_gateway_, so it is destroyed before it) and an in-flight reply would
+    // enqueue into freed memory.
+    order_gateway_.reset();
+
     if (listener_client_) listener_client_->stop();
     if (pricer_client_) pricer_client_->stop();
     if (io_context_) io_context_->stop();
