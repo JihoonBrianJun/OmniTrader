@@ -65,7 +65,7 @@ class MarketListener {
                     LOG_WARNING(logger_, "Failed write_json while broadcasting");
                 } else {
                     tcp_server_->broadcast_to_subscribers(msg.product, json_buffer);
-                    LOG_INFO(logger_, "{}", json_buffer);
+                    // LOG_INFO(logger_, "{}", json_buffer);
                 }
             } catch (const std::exception& e) {
                 LOG_WARNING(logger_, "Exception while broadcasting: {}", e.what());
