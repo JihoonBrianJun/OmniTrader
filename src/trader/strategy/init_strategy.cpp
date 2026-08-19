@@ -17,25 +17,6 @@ std::shared_ptr<BaseStrategy> init_strategy(
 }
 
 
-std::vector<std::shared_ptr<BaseStrategy>> batch_init_strategy(
-    const MarketConfig& market_config,
-    const argparse::ArgumentParser& program
-) {
-    std::vector<std::shared_ptr<BaseStrategy>> strategy_list;
-    auto strategy_name = program.get<std::string>("--strategy_name");
-
-    if (strategy_name == "Geuant") {
-        std::vector<GeuantParams> params_list;
-        batch_init(params_list, program);
-        for (const auto& params : params_list) {
-            strategy_list.emplace_back(std::make_shared<GeuantStrategy>(market_config, params));
-        }
-    }
-
-    return strategy_list;
-}
-
-
 std::shared_ptr<BaseStrategy> init_strategy_from_json(
     const MarketConfig& market_config,
     const std::string& strategy_name,

@@ -34,13 +34,6 @@ struct GeuantParams {
         program.add_argument("--use_bbo_cap_buffer").flag();
         program.add_argument("--bbo_cap_buffer_bp").scan<'g', double>().default_value(0.0);
 
-        program.add_argument("--spread_param_num").scan<'i', size_t>().default_value(size_t{0});
-        program.add_argument("--spread_const_bp_lb").scan<'g', double>().default_value(0.0);
-        program.add_argument("--spread_const_bp_ub").scan<'g', double>().default_value(0.0);
-        program.add_argument("--skew_param_num").scan<'i', size_t>().default_value(size_t{0});
-        program.add_argument("--skew_ratio_lb").scan<'g', double>().default_value(0.0);
-        program.add_argument("--skew_ratio_ub").scan<'g', double>().default_value(0.0);
-
         program.add_argument("--order_lots").scan<'i', int32_t>().default_value(int32_t{0});
         program.add_argument("--order_dollar").scan<'g', double>().default_value(0.0);
         program.add_argument("--position_limit_in_lots").scan<'i', int32_t>().default_value(int32_t{0});
@@ -53,7 +46,9 @@ struct GeuantParams {
         program.add_argument("--order_interval_ticks").scan<'i', size_t>().default_value(size_t{0});
     }
 
-    void basic_init(const argparse::ArgumentParser& program) {
+    void init(const argparse::ArgumentParser& program) {
+        spread_const_bp = program.get<double>("--spread_const_bp");
+        skew_ratio = program.get<double>("--skew_ratio");
         use_spread_cap = program.get<bool>("--use_spread_cap");
         spread_cap_bp = program.get<double>("--spread_cap_bp");
         use_bbo_cap_buffer = program.get<bool>("--use_bbo_cap_buffer");
@@ -71,23 +66,9 @@ struct GeuantParams {
         order_interval_ticks = program.get<size_t>("--order_interval_ticks");
     }
 
-    void core_init(double init_spread_const_bp, double init_skew_ratio) {
-        spread_const_bp = init_spread_const_bp;
-        skew_ratio = init_skew_ratio;
-    }
-
-    void init(const argparse::ArgumentParser& program) {
-        basic_init(program);
-        core_init(
-            program.get<double>("--spread_const_bp"),
-            program.get<double>("--skew_ratio")
-        );
-    }
-
     // File-based alternative to init(): reads the "strategy_params" section of the
     // trader's third launch-config file (config/<exchange>/strategy0.json). Covers
-    // the same fields init() does; the batch sweep params (--spread_param_num and
-    // friends) are CLI-only, since batch_init is not reachable from an entrypoint.
+    // the same fields init() does.
     void parse_json(const nlohmann::json& doc) {
         Omni::Config::JsonSection s(doc, "strategy_params");
         s.get("spread_const_bp", spread_const_bp);
@@ -110,12 +91,6 @@ struct GeuantParams {
         s.done();
     }
 };
-
-void batch_init(
-    std::vector<GeuantParams>& params_list,
-    const argparse::ArgumentParser& program
-);
-
 
 class GeuantStrategy : public BaseStrategy {
 public:

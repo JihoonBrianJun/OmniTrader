@@ -2,18 +2,6 @@
 
 namespace Omni::Trader {
 
-std::vector<double> interpolate_params(size_t param_num, double param_lb, double param_ub) {
-    std::vector<double> params_list;
-    auto param_interval = (param_ub - param_lb) / static_cast<double>(param_num - 1);
-
-    for (size_t param_idx = 0; param_idx < param_num; ++param_idx) {
-        params_list.emplace_back(param_lb + param_idx * param_interval);
-    }
-
-    return params_list;
-}
-
-
 BaseStrategy::BaseStrategy(const MarketConfig& market_config)
 :   min_tick_size_(market_config.min_tick_size),
     default_lot_size_(market_config.default_lot_size),

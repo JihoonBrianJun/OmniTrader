@@ -90,8 +90,6 @@ struct MarketConfig {
     }
 };
 
-std::vector<double> interpolate_params(size_t param_num, double param_lb, double param_ub);
-
 struct OutstandingOrder {
     int64_t price_in_min_ticks;
     int32_t qty_in_lots;

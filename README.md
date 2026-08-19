@@ -197,7 +197,6 @@ Field names match the CLI flags without the `--` prefix, with two exceptions in
 `ema_alpha` and `--factor_cap_bp` is `cap_bp`. Any field may be omitted to take its
 default, but an *unrecognized* field is an error rather than being ignored — a
 misspelled `order_lts` would otherwise leave the trader silently running at zero size.
-The batch sweep parameters (`--spread_param_num` and friends) are CLI-only.
 
 ### Product arguments
 

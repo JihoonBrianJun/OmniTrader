@@ -1,6 +1,5 @@
 #pragma once
 
-#include <vector>
 #include <memory>
 #include <argparse/argparse.hpp>
 #include <nlohmann/json.hpp>
@@ -10,11 +9,6 @@
 namespace Omni::Trader {
 
 std::shared_ptr<BaseStrategy> init_strategy(
-    const MarketConfig& market_config,
-    const argparse::ArgumentParser& program
-);
-
-std::vector<std::shared_ptr<BaseStrategy>> batch_init_strategy(
     const MarketConfig& market_config,
     const argparse::ArgumentParser& program
 );

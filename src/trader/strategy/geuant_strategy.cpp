@@ -4,33 +4,6 @@
 
 namespace Omni::Trader {
 
-void batch_init(
-    std::vector<GeuantParams>& params_list,
-    const argparse::ArgumentParser& program
-) {
-    params_list.clear();
-
-    auto spread_param_num = program.get<size_t>("--spread_param_num");
-    auto spread_const_bp_lb = program.get<double>("--spread_const_bp_lb");
-    auto spread_const_bp_ub = program.get<double>("--spread_const_bp_ub");
-    auto spread_params = interpolate_params(spread_param_num, spread_const_bp_lb, spread_const_bp_ub);
-
-    auto skew_param_num = program.get<size_t>("--skew_param_num");
-    auto skew_ratio_lb = program.get<double>("--skew_ratio_lb");
-    auto skew_ratio_ub = program.get<double>("--skew_ratio_ub");
-    auto skew_params = interpolate_params(skew_param_num, skew_ratio_lb, skew_ratio_ub);
-
-    for (size_t spread_idx = 0; spread_idx < spread_param_num; ++spread_idx) {
-        for (size_t skew_idx = 0; skew_idx < skew_param_num; ++skew_idx) {
-            GeuantParams params;
-            params.basic_init(program);
-            params.core_init(spread_params[spread_idx], skew_params[skew_idx]);
-            params_list.emplace_back(params);
-        }
-    }
-}
-
-
 GeuantStrategy::GeuantStrategy(const MarketConfig& market_config, const GeuantParams& params)
 :   BaseStrategy(market_config),
     params_(params)
