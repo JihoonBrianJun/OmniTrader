@@ -61,6 +61,28 @@ struct TraderConfig {
     std::string domain_type = "real";   // selects real vs test endpoints (REST + WS-API)
     long order_update_interval_ms = 1000;
 
+    // --- Shutdown ---------------------------------------------------------------
+    // However the session ends -- Ctrl-C, a supervisor's SIGTERM, the market close --
+    // the trader first pulls every resting order and then tries to get flat, so it
+    // does not leave quotes working or a position on with nothing watching it.
+    //
+    // Cancelling is unconditional: an order the trader can no longer manage has no
+    // business staying live. Flattening is a position decision, so it is a switch.
+    bool flatten_on_shutdown = true;
+    // How long to keep chasing cancel acks before giving up and logging what is left.
+    long shutdown_cancel_timeout_ms = 3000;
+    // How long to work the position passively (the strategy's liquidation quote, one
+    // tick inside the touch) before falling back to a market order.
+    long shutdown_flatten_timeout_ms = 5000;
+    // Send that market order for whatever the passive stage could not get done. Off
+    // means the trader exits with the residual and says so loudly, which is the right
+    // choice on a venue or account where an automatic market order is unwelcome.
+    bool shutdown_market_flatten = true;
+    // Tag the flattening orders reduceOnly, so a stale position count can never turn a
+    // close into a new position the other way. Turn this off for a Binance futures
+    // account in Hedge Mode, which rejects the flag outright.
+    bool shutdown_reduce_only = true;
+
     // Loop-control / logging.
     long timezone_minute_offset = 0;
     long market_end_intraday_minute = -1;
@@ -92,6 +114,15 @@ struct TraderConfig {
             .scan<'i', int64_t>().default_value(int64_t{1000});
         program.add_argument("--domain_type").default_value(std::string("real"));
         program.add_argument("--order_update_interval_ms").scan<'i', int64_t>().default_value(int64_t{1000});
+        // Shutdown behaviour. The two defaults-on switches are expressed as
+        // --no_... flags so the safe behaviour needs no argument to get.
+        program.add_argument("--no_flatten_on_shutdown").flag();
+        program.add_argument("--shutdown_cancel_timeout_ms")
+            .scan<'i', int64_t>().default_value(int64_t{3000});
+        program.add_argument("--shutdown_flatten_timeout_ms")
+            .scan<'i', int64_t>().default_value(int64_t{5000});
+        program.add_argument("--no_shutdown_market_flatten").flag();
+        program.add_argument("--no_shutdown_reduce_only").flag();
         program.add_argument("--timezone_minute_offset").scan<'i', int64_t>().default_value(int64_t{0});
         program.add_argument("--market_end_intraday_minute").scan<'i', int64_t>().default_value(int64_t{-1});
         program.add_argument("--log_base_path").default_value(std::string("./log"));
@@ -130,6 +161,11 @@ struct TraderConfig {
         fair_price_max_age_ms = program.get<int64_t>("--fair_price_max_age_ms");
         domain_type = program.get<std::string>("--domain_type");
         order_update_interval_ms = program.get<int64_t>("--order_update_interval_ms");
+        flatten_on_shutdown = !program.get<bool>("--no_flatten_on_shutdown");
+        shutdown_cancel_timeout_ms = program.get<int64_t>("--shutdown_cancel_timeout_ms");
+        shutdown_flatten_timeout_ms = program.get<int64_t>("--shutdown_flatten_timeout_ms");
+        shutdown_market_flatten = !program.get<bool>("--no_shutdown_market_flatten");
+        shutdown_reduce_only = !program.get<bool>("--no_shutdown_reduce_only");
         timezone_minute_offset = program.get<int64_t>("--timezone_minute_offset");
         market_end_intraday_minute = program.get<int64_t>("--market_end_intraday_minute");
         log_base_path = program.get<std::string>("--log_base_path");
@@ -184,6 +220,15 @@ struct TraderConfig {
         s.get("fair_price_max_age_ms", fair_price_max_age_ms);
         s.get("domain_type", domain_type);
         s.get("order_update_interval_ms", order_update_interval_ms);
+        // Stated positively here. The CLI spells the two defaults-on switches as
+        // --no_flatten_on_shutdown / --no_shutdown_market_flatten / --no_shutdown_
+        // reduce_only, since a flag can only turn something on; a JSON field can just
+        // say false.
+        s.get("flatten_on_shutdown", flatten_on_shutdown);
+        s.get("shutdown_cancel_timeout_ms", shutdown_cancel_timeout_ms);
+        s.get("shutdown_flatten_timeout_ms", shutdown_flatten_timeout_ms);
+        s.get("shutdown_market_flatten", shutdown_market_flatten);
+        s.get("shutdown_reduce_only", shutdown_reduce_only);
         s.get("timezone_minute_offset", timezone_minute_offset);
         s.get("market_end_intraday_minute", market_end_intraday_minute);
         s.get("log_base_path", log_base_path);

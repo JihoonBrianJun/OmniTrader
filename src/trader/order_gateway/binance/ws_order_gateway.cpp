@@ -128,6 +128,9 @@ bool WsOrderGateway::place_order(const OG::OrderPlaceInfo& info) {
         params["timeInForce"] = "GTC";
         params["price"] = rest_client_->format_price(info.product, info.price);
     }
+    // Only sent when asked for: USD-M futures accepts reduceOnly in One-way mode and
+    // rejects it in Hedge Mode, so the flag has to stay opt-in.
+    if (info.reduce_only) params["reduceOnly"] = "true";
     return send_request("order.place", std::move(params), info.cid);
 }
 

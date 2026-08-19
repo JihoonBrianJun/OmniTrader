@@ -8,6 +8,7 @@
 #include "loggers/logger.hpp"
 
 #include "utils/datetime.hpp"
+#include "utils/shutdown.hpp"
 #include "config_handlers/json_config.hpp"
 #include "trader/trader_dtypes.hpp"
 #include "trader/strategy/init_strategy.hpp"
@@ -91,6 +92,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Installed before the handler exists, so a signal arriving during startup is
+    // recorded rather than killing the process midway through connecting.
+    Omni::install_shutdown_handler();
+
     quill::BackendOptions backend_options;
     quill::Backend::start(backend_options);
 
@@ -111,14 +116,28 @@ int main(int argc, char* argv[]) {
     }
 
     while (
-        config.market_end_intraday_minute < 0 ||
-        Omni::get_curr_intraday_minute(config.timezone_minute_offset) < config.market_end_intraday_minute
+        !Omni::shutdown_requested() &&
+        (config.market_end_intraday_minute < 0 ||
+         Omni::get_curr_intraday_minute(config.timezone_minute_offset) < config.market_end_intraday_minute)
     ) {
         try {
             order_handler->run();
         } catch (const std::exception& e) {
             LOG_WARNING(logger, "Exception while trading: {}", e.what());
         }
+    }
+
+    // Whatever ended the session -- a signal or the market close -- leave the venue in
+    // the state we would want to come back to: nothing resting, nothing on. Bounded
+    // internally, and it reports in the log whatever it could not finish.
+    LOG_INFO(
+        logger, "Trading loop ended ({}); running shutdown",
+        Omni::shutdown_requested() ? "signal" : "market close"
+    );
+    try {
+        order_handler->shutdown();
+    } catch (const std::exception& e) {
+        LOG_ERROR(logger, "Exception during shutdown: {}", e.what());
     }
 
     return 0;

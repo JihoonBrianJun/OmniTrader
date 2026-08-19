@@ -16,6 +16,12 @@ struct OrderPlaceInfo {
     double qty;
     std::string product;
     uint64_t cid = 0;
+    // Close-only: the venue must reject this order if it would open or increase a
+    // position rather than reduce one. Set on the trader's shutdown flattening
+    // orders, where a position count that is a fill out of date would otherwise turn
+    // a close into a fresh position the other way. Ignored by venues that have no
+    // such concept (KIS cash equities).
+    bool reduce_only = false;
 };
 
 struct OrderAmendInfo {

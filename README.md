@@ -230,6 +230,51 @@ build/trader --exchange binance --domain_type test \
 
 `--subscribe_products` defaults to `--trade_products` when omitted.
 
+### Stopping the trader
+
+The trader traps `SIGINT` and `SIGTERM`. It does not just exit: whatever it had
+resting at the exchange would stay resting, and whatever it was holding would stay
+held, with nothing watching either. So on a stop -- Ctrl-C, a supervisor's `SIGTERM`,
+or the configured market close -- it runs a bounded shutdown:
+
+1. **Cancel everything.** Unconditional. Repeated rather than fired once, because an
+   order placed moments before the stop has no exchange order id yet and cannot be
+   cancelled until its place ack arrives.
+2. **Get flat, passively.** The strategy's liquidation branch quotes the whole
+   position one tick inside the touch, which gets out at the top of the book without
+   paying the spread.
+3. **Cross if it has to.** If the passive quote has not filled by
+   `shutdown_flatten_timeout_ms`, the resting quote is pulled and the remainder goes
+   out as a `reduceOnly` market order.
+4. **Report.** Anything it could not finish is logged as
+   `[Shutdown] EXITING WITH A POSITION`, with the residual.
+
+Nothing the process placed is left working, on any path -- including the one where
+flattening is turned off or gives up.
+
+A **second** signal is not swallowed. It restores the default disposition and
+re-raises, so a shutdown that is hanging can always be cut short; that leaves orders
+behind, which is the operator's call to make.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `flatten_on_shutdown` | `true` | Off = cancel only, leave the position on. |
+| `shutdown_cancel_timeout_ms` | `3000` | How long to chase cancel acks. |
+| `shutdown_flatten_timeout_ms` | `5000` | How long to work the position passively before crossing. |
+| `shutdown_market_flatten` | `true` | Off = never cross; exit with the residual and say so. |
+| `shutdown_reduce_only` | `true` | Tags the flattening orders `reduceOnly`. **Turn off for a Binance futures account in Hedge Mode**, which rejects the flag. |
+
+On the CLI the three defaults-on switches are `--no_flatten_on_shutdown`,
+`--no_shutdown_market_flatten` and `--no_shutdown_reduce_only`, since a flag can only
+turn something on; in JSON they are stated positively.
+
+**Stop the trader before the listener.** Position and fills both reach the trader over
+the listener link, so with the listener already gone the trader cannot work the
+position out passively and cannot confirm that a market order filled. It says so
+rather than guessing -- the report is tagged *"listener link is down -- this is the
+last state we were told, not confirmed"* -- but it is a worse shutdown. The listener
+and pricer do not trap signals; they are stateless at the venue and safe to Ctrl-C.
+
 ### Two grids, on purpose
 
 The trader runs on two different notions of tick and lot, and keeping them apart is

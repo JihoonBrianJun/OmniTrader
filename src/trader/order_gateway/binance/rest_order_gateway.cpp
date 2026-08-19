@@ -77,6 +77,8 @@ bool RestOrderGateway::place_order(const OG::OrderPlaceInfo& info) {
             "&timeInForce=GTC&price={}", rest_client_->format_price(info.product, info.price)
         );
     }
+    // See the WS gateway: reduceOnly is valid in One-way mode only, so it is opt-in.
+    if (info.reduce_only) params += "&reduceOnly=true";
     send_order("POST", params, info.cid);
     return true;
 }

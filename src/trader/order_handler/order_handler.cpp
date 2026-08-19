@@ -1,6 +1,8 @@
 #include <stdexcept>
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <vector>
 #include <fmt/core.h>
 #include <quill/LogMacros.h>
 
@@ -33,7 +35,8 @@ OrderHandler::OrderHandler(
     const MarketConfig& market_config,
     std::shared_ptr<BaseStrategy> strategy,
     const TraderConfig& config,
-    quill::Logger* logger
+    quill::Logger* logger,
+    GatewayFactory make_gateway
 )
 :   logger_(logger),
     market_config_(market_config),
@@ -48,7 +51,14 @@ OrderHandler::OrderHandler(
     pricer_port_(config.pricer_port),
     fair_price_max_age_ns_(config.fair_price_max_age_ms * 1000000),
     order_update_interval_ns_(config.order_update_interval_ms * 1000000),
-    order_gateway_(create_order_gateway(config, logger)),
+    flatten_on_shutdown_(config.flatten_on_shutdown),
+    shutdown_cancel_timeout_ns_(config.shutdown_cancel_timeout_ms * 1000000),
+    shutdown_flatten_timeout_ns_(config.shutdown_flatten_timeout_ms * 1000000),
+    shutdown_market_flatten_(config.shutdown_market_flatten),
+    shutdown_reduce_only_(config.shutdown_reduce_only),
+    order_gateway_(
+        make_gateway ? make_gateway(config, logger) : create_order_gateway(config, logger)
+    ),
     io_context_(std::make_unique<boost::asio::io_context>()),
     listener_connecting_(false),
     listener_connected_(false),
@@ -92,6 +102,11 @@ OrderHandler::OrderHandler(
 
 
 OrderHandler::~OrderHandler() {
+    // Deliberately does not cancel or flatten. Sending orders needs a live feed, a
+    // working gateway and somewhere to report failure, none of which a destructor
+    // has; the owner calls shutdown() first, on every exit path, and this only tears
+    // the links down.
+    shutting_down_.store(true, std::memory_order_relaxed);
     if (listener_client_) listener_client_->stop();
     if (pricer_client_) pricer_client_->stop();
     if (io_context_) io_context_->stop();
@@ -99,19 +114,19 @@ OrderHandler::~OrderHandler() {
 }
 
 
-int64_t OrderHandler::to_price_in_min_ticks(double price) {
+int64_t OrderHandler::to_price_in_min_ticks(double price) const {
     return static_cast<int64_t>(std::round(price / min_tick_size_));
 }
 
-int32_t OrderHandler::to_qty_in_lots(double qty) {
+int32_t OrderHandler::to_qty_in_lots(double qty) const {
     return static_cast<int32_t>(std::round(qty / default_lot_size_));
 }
 
-double OrderHandler::to_double_price(int64_t price_in_min_ticks) {
+double OrderHandler::to_double_price(int64_t price_in_min_ticks) const {
     return static_cast<double>(price_in_min_ticks) * min_tick_size_;
 }
 
-double OrderHandler::to_double_qty(int32_t qty_in_lots) {
+double OrderHandler::to_double_qty(int32_t qty_in_lots) const {
     return static_cast<double>(qty_in_lots) * default_lot_size_;
 }
 
@@ -132,13 +147,19 @@ bool snap_to_product_grid(
         double tick = info.tick_size.value();
         price = std::round(price / tick) * tick;
     }
+    // A non-positive price is never a valid limit -- drop it rather than hand it to
+    // the exchange.
+    return snap_qty_to_product_grid(info, qty) && price > 0.0;
+}
+
+
+bool snap_qty_to_product_grid(const Omni::ProductInfoData& info, double& qty) {
     if (info.lot_size.has_value() && info.lot_size.value() > 0.0) {
         double lot = info.lot_size.value();
         qty = std::round(qty / lot) * lot;
     }
-    // A size that rounds away to nothing is not an order, and a non-positive price
-    // is never a valid limit -- drop both rather than hand them to the exchange.
-    return qty > 0.0 && price > 0.0;
+    // A size that rounds away to nothing is not an order.
+    return qty > 0.0;
 }
 
 
@@ -152,6 +173,10 @@ void OrderHandler::set_order_update_timer() {
         if (ec == boost::asio::error::operation_aborted) {
             return;
         } else if (!ec) {
+            // Checked on the io thread, which is the only one that arms this timer:
+            // once shutdown has begun the decision tick stops, so nothing new is
+            // quoted underneath the sequence that is trying to get flat.
+            if (shutting_down_.load(std::memory_order_relaxed)) return;
             for (const auto& trade_product : trade_products_) {
                 trader_queue_.enqueue(OrderUpdate{.product = trade_product});
             }
@@ -558,7 +583,12 @@ void OrderHandler::process_market_data(const MarketDataResponse& response) {
 }
 
 
-void OrderHandler::update_orders(const std::string& product) {
+void OrderHandler::update_orders(const std::string& product, bool do_liquidate) {
+    // A decision tick queued just before the stop must not turn into fresh quotes
+    // behind the shutdown sequence's back. The sequence's own liquidation calls come
+    // through here too, and are let past.
+    if (shutting_down_.load(std::memory_order_relaxed) && !do_liquidate) return;
+
     auto state_it = product_states_.find(product);
     if (state_it == product_states_.end()) {
         LOG_WARNING(logger_, "[Decision] {} skipped: no product state", product);
@@ -640,7 +670,7 @@ void OrderHandler::update_orders(const std::string& product) {
     std::map<int64_t, int32_t> bid_place_orders, ask_place_orders;
     std::vector<uint64_t> bid_cancel_orders, ask_cancel_orders;
     strategy_->make_decision(
-        price_info, false, state.position_in_lots, state.outstanding_orders,
+        price_info, do_liquidate, state.position_in_lots, state.outstanding_orders,
         bid_place_orders, ask_place_orders, bid_cancel_orders, ask_cancel_orders
     );
 
@@ -658,36 +688,57 @@ void OrderHandler::update_orders(const std::string& product) {
         bid_cancel_orders.size(), ask_cancel_orders.size()
     );
 
-    // Mark a cid as awaiting a reply, stamping the wait start on the first one so the
-    // timeout above has a reference point. Orders are fired without blocking; their
-    // outcome arrives later via on_order_response (or the execution feed).
-    auto mark_waiting = [&](std::set<uint64_t>& waiting_set, uint64_t cid) {
-        if (state.response_waiting.no_waiting_orders()) {
-            state.response_waiting_since_ns = get_curr_tstamp_ns();
-        }
-        waiting_set.insert(cid);
+    // Orders are fired without blocking; their outcome arrives later via
+    // on_order_response (or the execution feed). Cancels go first, so a replace frees
+    // its level before the new order is sent.
+    for (auto cid : bid_cancel_orders) submit_cancel(state, product, cid);
+    for (auto cid : ask_cancel_orders) submit_cancel(state, product, cid);
+
+    for (const auto& [price_in_min_ticks, qty_in_lots] : bid_place_orders) {
+        submit_place(state, product, true, price_in_min_ticks, qty_in_lots);
+    }
+    for (const auto& [price_in_min_ticks, qty_in_lots] : ask_place_orders) {
+        submit_place(state, product, false, price_in_min_ticks, qty_in_lots);
+    }
+}
+
+
+void OrderHandler::mark_waiting(
+    ProductState& state, std::set<uint64_t>& waiting_set, uint64_t cid
+) {
+    if (state.response_waiting.no_waiting_orders()) {
+        state.response_waiting_since_ns = get_curr_tstamp_ns();
+    }
+    waiting_set.insert(cid);
+}
+
+
+void OrderHandler::submit_cancel(
+    ProductState& state, const std::string& product, uint64_t cid
+) {
+    auto on_it = state.cid_to_order_no.find(cid);
+    if (on_it == state.cid_to_order_no.end()) return;   // order_no not known yet
+    Omni::OrderGateway::OrderCancelInfo info{
+        .order_no = on_it->second, .product = product, .cid = cid
     };
+    mark_waiting(state, state.response_waiting.response_waiting_cancel_orders, cid);
+    order_gateway_->cancel_order(info);
+    LOG_INFO(logger_, "[Order Cancel] {} cid={} order_no={} sent", product, cid, info.order_no);
+}
 
-    auto submit_cancel = [&](uint64_t cid) {
-        auto on_it = state.cid_to_order_no.find(cid);
-        if (on_it == state.cid_to_order_no.end()) return;   // order_no not known yet
-        Omni::OrderGateway::OrderCancelInfo info{
-            .order_no = on_it->second, .product = product, .cid = cid
-        };
-        mark_waiting(state.response_waiting.response_waiting_cancel_orders, cid);
-        order_gateway_->cancel_order(info);
-        LOG_INFO(logger_, "[Order Cancel] {} cid={} order_no={} sent", product, cid, info.order_no);
-    };
-    for (auto cid : bid_cancel_orders) submit_cancel(cid);
-    for (auto cid : ask_cancel_orders) submit_cancel(cid);
 
-    auto submit_place = [&](bool is_bid, int64_t price_in_min_ticks, int32_t qty_in_lots) {
-        if (qty_in_lots <= 0) return;
+void OrderHandler::submit_place(
+    ProductState& state, const std::string& product,
+    bool is_bid, int64_t price_in_min_ticks, int32_t qty_in_lots,
+    bool is_limit, bool reduce_only
+) {
+    if (qty_in_lots <= 0) return;
 
-        // The one point where the product's real grid is applied. Everything above
-        // this line is in global units; everything the exchange sees is snapped.
-        double price = to_double_price(price_in_min_ticks);
-        double qty = to_double_qty(qty_in_lots);
+    // The one point where the product's real grid is applied. Everything above this
+    // line is in global units; everything the exchange sees is snapped.
+    double price = to_double_price(price_in_min_ticks);
+    double qty = to_double_qty(qty_in_lots);
+    if (is_limit) {
         if (!snap_to_product_grid(state.product_info, is_bid, price, qty)) {
             LOG_INFO(
                 logger_, "[Order Place] {} is_bid={} px={} skipped: qty rounds to zero on product grid",
@@ -695,50 +746,60 @@ void OrderHandler::update_orders(const std::string& product) {
             );
             return;
         }
+    } else {
+        // A market order has no price to snap, only a size. It is priced by the book
+        // it lands in, so `price` goes out as 0 and the gateways omit it.
+        if (!snap_qty_to_product_grid(state.product_info, qty)) {
+            LOG_INFO(
+                logger_, "[Order Place] {} is_bid={} MARKET skipped: qty rounds to zero on product grid",
+                product, is_bid
+            );
+            return;
+        }
+        price = 0.0;
+    }
 
-        uint64_t cid = reserve_cid(product);
-        // Register optimistically so the strategy won't re-issue the order while we
-        // await the ack; the order_no is bound on the reply/execution, and the order
-        // is dropped again if the place fails.
-        //
-        // Recorded in global units -- the pre-snap values the strategy asked for, not
-        // the post-snap ones sent. choose_orders_to_cancel matches this against the
-        // strategy's next set of desired prices, which are computed on the same grid;
-        // storing the snapped price would make an order it still wants look like one
-        // it does not, and churn a cancel/replace every tick.
+    uint64_t cid = reserve_cid(product);
+    // Register optimistically so the strategy won't re-issue the order while we
+    // await the ack; the order_no is bound on the reply/execution, and the order
+    // is dropped again if the place fails.
+    //
+    // Recorded in global units -- the pre-snap values the strategy asked for, not
+    // the post-snap ones sent. choose_orders_to_cancel matches this against the
+    // strategy's next set of desired prices, which are computed on the same grid;
+    // storing the snapped price would make an order it still wants look like one
+    // it does not, and churn a cancel/replace every tick.
+    //
+    // Limit orders only. A market order does not rest, so recording it as outstanding
+    // would make the shutdown's "is anything still working?" check answer yes to an
+    // order that is already gone, and send a cancel chasing it. Its cid is still
+    // registered (reserve_cid above), which is all the reply and the fill need.
+    if (is_limit) {
         state.outstanding_orders[cid] = OutstandingOrder{
             .price_in_min_ticks = price_in_min_ticks,
             .qty_in_lots = qty_in_lots,
             .is_bid = is_bid
         };
-        mark_waiting(state.response_waiting.response_waiting_place_orders, cid);
-        Omni::OrderGateway::OrderPlaceInfo info{
-            .is_limit = true,
-            .is_bid = is_bid,
-            .price = price,
-            .qty = qty,
-            .product = product,
-            .cid = cid
-        };
-        order_gateway_->place_order(info);
-        LOG_INFO(
-            logger_, "[Order Place] {} cid={} is_bid={} px={} qty={} sent",
-            product, cid, is_bid, info.price, info.qty
-        );
+    }
+    mark_waiting(state, state.response_waiting.response_waiting_place_orders, cid);
+    Omni::OrderGateway::OrderPlaceInfo info{
+        .is_limit = is_limit,
+        .is_bid = is_bid,
+        .price = price,
+        .qty = qty,
+        .product = product,
+        .cid = cid,
+        .reduce_only = reduce_only
     };
-    for (const auto& [price_in_min_ticks, qty_in_lots] : bid_place_orders) {
-        submit_place(true, price_in_min_ticks, qty_in_lots);
-    }
-    for (const auto& [price_in_min_ticks, qty_in_lots] : ask_place_orders) {
-        submit_place(false, price_in_min_ticks, qty_in_lots);
-    }
+    order_gateway_->place_order(info);
+    LOG_INFO(
+        logger_, "[Order Place] {} cid={} is_bid={} type={} px={} qty={} reduce_only={} sent",
+        product, cid, is_bid, is_limit ? "LIMIT" : "MARKET", info.price, info.qty, reduce_only
+    );
 }
 
 
-void OrderHandler::run() {
-    Task task;
-    trader_queue_.wait_dequeue(task);
-
+void OrderHandler::handle_task(const Task& task) {
     std::visit(overloaded{
         [&](const ListenerStatusUpdate& response) { on_listener_status(response); },
         [&](const ListenerSubscribeUpdate& response) { on_listener_subscribe(response); },
@@ -749,6 +810,231 @@ void OrderHandler::run() {
         [&](const OrderUpdate& update) { update_orders(update.product); },
         [&](const OrderResponseTask& response) { on_order_response(response); }
     }, task);
+}
+
+
+void OrderHandler::run() {
+    Task task;
+    // Timed rather than an outright block: the caller checks for a shutdown request
+    // between turns, and on a market that has gone quiet an untimed wait would sit
+    // there through a Ctrl-C until the next event happened to arrive. The timed and
+    // untimed waits share the same fast path -- try-dequeue, then spin -- and differ
+    // only in whether the final block carries a deadline, so this costs nothing when
+    // there is work and about ten idle wakeups a second when there is not.
+    if (!trader_queue_.wait_dequeue_timed(task, std::chrono::milliseconds(100))) return;
+    handle_task(task);
+}
+
+
+void OrderHandler::pump_until(const std::function<bool()>& done, long deadline_ns) {
+    Task task;
+    while (!done()) {
+        long remaining_ns = deadline_ns - get_curr_tstamp_ns();
+        if (remaining_ns <= 0) return;
+        // Capped so `done` is re-evaluated regularly even on a silent queue: some of
+        // the conditions we wait on (a position update that already arrived, a wait
+        // cleared by a timeout) are not themselves signalled by a new event.
+        auto wait_us = std::min<long>(remaining_ns / 1000, 20000);
+        if (trader_queue_.wait_dequeue_timed(task, std::chrono::microseconds(wait_us))) {
+            handle_task(task);
+        }
+    }
+}
+
+
+bool OrderHandler::no_orders_outstanding() const {
+    for (const auto& [product, state] : product_states_) {
+        if (!state.outstanding_orders.empty()) return false;
+    }
+    return true;
+}
+
+
+bool OrderHandler::all_flat() const {
+    for (const auto& [product, state] : product_states_) {
+        if (state.position_in_lots != 0) return false;
+    }
+    return true;
+}
+
+
+// Everything the handler knows about position and fills reaches it over the listener
+// link. With that link down the numbers below are the last ones we were told, not the
+// current ones -- worth saying out loud in a shutdown report, where the difference is
+// between "you are holding this" and "I could not find out".
+std::string OrderHandler::residual_caveat() const {
+    // Only worth saying when there is something to be unsure about. A clean state
+    // reported over a dead link is still the answer the operator wanted.
+    if (listener_connected_ || (no_orders_outstanding() && all_flat())) return "";
+    return " (listener link is down -- this is the last state we were told, not confirmed)";
+}
+
+
+std::string OrderHandler::format_residual() const {
+    std::string out;
+    for (const auto& [product, state] : product_states_) {
+        if (state.outstanding_orders.empty() && state.position_in_lots == 0) continue;
+        if (!out.empty()) out += " ";
+        out += fmt::format(
+            "{}(orders={},position={})",
+            product, state.outstanding_orders.size(), to_double_qty(state.position_in_lots)
+        );
+    }
+    return out.empty() ? "(clean)" : out;
+}
+
+
+void OrderHandler::cancel_all_orders(long deadline_ns) {
+    // Repeated rather than fired once: an order placed moments before the stop has no
+    // exchange order_no yet, so it cannot be cancelled by id until its place ack lands
+    // -- and pumping the queue is what brings that ack in. Each round cancels whatever
+    // has become cancellable since the last one.
+    while (!no_orders_outstanding() && get_curr_tstamp_ns() < deadline_ns) {
+        size_t sent = 0, unacked = 0;
+        for (auto& [product, state] : product_states_) {
+            // Copied: submit_cancel does not erase from outstanding_orders (the ack
+            // does), but taking the keys first keeps that independent of it.
+            std::vector<uint64_t> cids;
+            cids.reserve(state.outstanding_orders.size());
+            for (const auto& [cid, order] : state.outstanding_orders) cids.push_back(cid);
+            for (auto cid : cids) {
+                if (state.response_waiting.response_waiting_cancel_orders.count(cid)) continue;
+                if (!state.cid_to_order_no.count(cid)) { ++unacked; continue; }
+                submit_cancel(state, product, cid);
+                ++sent;
+            }
+        }
+        if (sent == 0 && unacked == 0) break;
+        LOG_INFO(
+            logger_, "[Shutdown] cancel round: sent={} awaiting_place_ack={}", sent, unacked
+        );
+        pump_until(
+            [this]() { return no_orders_outstanding(); },
+            std::min<long>(get_curr_tstamp_ns() + 200L * 1000000, deadline_ns)
+        );
+    }
+
+    if (no_orders_outstanding()) {
+        LOG_INFO(logger_, "[Shutdown] all orders cancelled");
+    } else {
+        LOG_ERROR(
+            logger_, "[Shutdown] gave up cancelling after {} ms; still open: {}",
+            shutdown_cancel_timeout_ns_ / 1000000, format_residual()
+        );
+    }
+}
+
+
+void OrderHandler::submit_market_flatten(const std::string& product, ProductState& state) {
+    int32_t position = state.position_in_lots;
+    if (position == 0) return;
+    // Buy back a short, sell out of a long.
+    submit_place(
+        state, product, /*is_bid=*/position < 0, /*price_in_min_ticks=*/0,
+        /*qty_in_lots=*/position > 0 ? position : -position,
+        /*is_limit=*/false, /*reduce_only=*/shutdown_reduce_only_
+    );
+}
+
+
+void OrderHandler::flatten_positions(long deadline_ns) {
+    if (all_flat()) {
+        LOG_INFO(logger_, "[Shutdown] nothing to flatten");
+        return;
+    }
+    LOG_INFO(logger_, "[Shutdown] flattening: {}", format_residual());
+
+    // Passive first. The strategy's liquidation branch quotes the whole position one
+    // tick inside the touch, which gets out at the top of the book without paying the
+    // spread. It needs a live book to quote against and is not guaranteed to fill,
+    // which is what the deadline and the market fallback below are for.
+    while (!all_flat() && get_curr_tstamp_ns() < deadline_ns) {
+        for (const auto& product : trade_products_) {
+            update_orders(product, /*do_liquidate=*/true);
+        }
+        pump_until(
+            [this]() { return all_flat(); },
+            std::min<long>(get_curr_tstamp_ns() + order_update_interval_ns_, deadline_ns)
+        );
+    }
+    if (all_flat()) {
+        LOG_INFO(logger_, "[Shutdown] flat");
+        return;
+    }
+
+    if (!shutdown_market_flatten_) {
+        LOG_ERROR(
+            logger_, "[Shutdown] EXITING WITH A POSITION: {} (market flatten disabled){}",
+            format_residual(), residual_caveat()
+        );
+        return;
+    }
+
+    // Pull the resting liquidation quotes before crossing, so the two cannot both fill
+    // and leave the position turned around. reduce_only is the second line of defence
+    // on a venue that supports it.
+    LOG_WARNING(
+        logger_, "[Shutdown] passive flatten timed out after {} ms; going to market: {}",
+        shutdown_flatten_timeout_ns_ / 1000000, format_residual()
+    );
+    cancel_all_orders(get_curr_tstamp_ns() + shutdown_cancel_timeout_ns_);
+
+    for (auto& [product, state] : product_states_) {
+        submit_market_flatten(product, state);
+    }
+    pump_until(
+        [this]() { return all_flat(); },
+        get_curr_tstamp_ns() + shutdown_flatten_timeout_ns_
+    );
+
+    if (all_flat()) {
+        LOG_INFO(logger_, "[Shutdown] flat");
+    } else {
+        LOG_ERROR(
+            logger_, "[Shutdown] EXITING WITH A POSITION: {}{}",
+            format_residual(), residual_caveat()
+        );
+    }
+}
+
+
+void OrderHandler::shutdown() {
+    if (shutdown_done_) return;
+    shutdown_done_ = true;
+    // Stops the decision tick re-arming, and makes any tick already on the queue a
+    // no-op, so nothing quotes underneath what follows.
+    shutting_down_.store(true, std::memory_order_relaxed);
+
+    LOG_INFO(logger_, "[Shutdown] starting; state: {}", format_residual());
+
+    // Cancel unconditionally: an order the trader is about to stop managing has no
+    // business staying live at the exchange.
+    cancel_all_orders(get_curr_tstamp_ns() + shutdown_cancel_timeout_ns_);
+
+    if (!flatten_on_shutdown_) {
+        if (!all_flat()) {
+            LOG_WARNING(
+                logger_, "[Shutdown] leaving position on (flatten_on_shutdown is off): {}{}",
+                format_residual(), residual_caveat()
+            );
+        }
+        LOG_INFO(logger_, "[Shutdown] done");
+        return;
+    }
+
+    flatten_positions(get_curr_tstamp_ns() + shutdown_flatten_timeout_ns_);
+
+    // Nothing this process placed may outlive it. The flatten's own liquidation quote
+    // is the last thing that can still be resting -- it is left working whenever the
+    // passive stage runs out of time or is not allowed to cross -- and an order with
+    // nothing watching it is exactly what the cancel phase existed to prevent.
+    if (!no_orders_outstanding()) {
+        LOG_INFO(logger_, "[Shutdown] pulling the liquidation quote(s) left working");
+        cancel_all_orders(get_curr_tstamp_ns() + shutdown_cancel_timeout_ns_);
+    }
+    LOG_INFO(
+        logger_, "[Shutdown] done; final state: {}{}", format_residual(), residual_caveat()
+    );
 }
 
 } // namespace Omni::Trader
