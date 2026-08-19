@@ -4,7 +4,9 @@
     "strategy_name": "Geuant",
     "market_type": "derivatives",
     "domain_type": "real",
-    "trade_products": ["BTCUSDT:futures"],
+    "trade_products": [
+        "BTCUSDC:futures"
+    ],
     "subscribe_products": [],
     "broadcast_host_address": "0.0.0.0",
     "broadcast_port": 8888,

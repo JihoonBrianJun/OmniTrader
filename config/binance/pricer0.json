@@ -1,7 +1,9 @@
 {
   "pricer_config": {
-    "fair_price_mode": "MID",
-    "products": ["BTCUSDT:futures"],
+    "fair_price_mode": "FACTOR",
+    "products": [
+        "BTCUSDC:futures"
+    ],
     "broadcast_host_address": "0.0.0.0",
     "broadcast_port": 8888,
     "publish_host_address": "0.0.0.0",

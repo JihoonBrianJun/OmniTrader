@@ -3,7 +3,9 @@
     "exchange": "binance",
     "market_type": "derivatives",
     "domain_type": "real",
-    "products": ["BTCUSDT:futures"],
+    "products": [
+        "BTCUSDC:futures"
+    ],
     "orderbook_levels": 20,
     "product_info_refresh_sec": 300,
     "broadcast_host_address": "0.0.0.0",
