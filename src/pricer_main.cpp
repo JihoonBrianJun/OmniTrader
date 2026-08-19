@@ -58,7 +58,13 @@ int main(int argc, char* argv[]) {
         };
     } else {
         // Header parse to learn the factor before registering its args.
-        argparse::ArgumentParser header("HeaderParser");
+        // default_arguments::none keeps this throwaway parser from owning -h/-v: it
+        // would otherwise print its own one-flag usage and exit before the real
+        // parser below had registered anything, so --help could never show the
+        // factor's own arguments.
+        argparse::ArgumentParser header(
+            "HeaderParser", "1.0", argparse::default_arguments::none
+        );
         Omni::Pricer::FactorConfig::set_header_parser(header);
         header.parse_known_args(argc, argv);
         auto factor_name = header.get<std::string>("--factor_name");

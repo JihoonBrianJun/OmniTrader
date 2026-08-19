@@ -54,7 +54,13 @@ int main(int argc, char* argv[]) {
         }
     } else {
         // Header parse to learn the exchange + strategy before registering their args.
-        argparse::ArgumentParser header("HeaderParser");
+        // default_arguments::none keeps this throwaway parser from owning -h/-v: it
+        // would otherwise print its own two-flag usage and exit before the real
+        // parser below had registered anything, so --help could never show the
+        // strategy's own arguments.
+        argparse::ArgumentParser header(
+            "HeaderParser", "1.0", argparse::default_arguments::none
+        );
         Omni::Trader::TraderConfig::set_header_parser(header);
         header.parse_known_args(argc, argv);
         auto strategy_name = header.get<std::string>("--strategy_name");
