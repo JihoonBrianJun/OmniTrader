@@ -20,7 +20,7 @@ template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 Pricer::Pricer(
     const PricerConfig& config,
     const FactorConfig& factor_config,
-    const argparse::ArgumentParser& program,
+    const FactorBuilder& make_factor,
     quill::Logger* logger
 )
 :   logger_(logger),
@@ -36,7 +36,7 @@ Pricer::Pricer(
     for (const auto& spec : config_.products) {
         std::unique_ptr<BaseFactor> factor;
         if (config_.mode == FairPriceMode::FACTOR) {
-            factor = init_factor(factor_config, program);
+            factor = make_factor();
             if (!factor) {
                 throw std::runtime_error(
                     fmt::format("Unknown factor: {}", factor_config.factor_name)

@@ -1,0 +1,20 @@
+{
+  "listener_config": {
+    "exchange": "kis",
+    "region": "korea",
+    "market_type": "derivatives",
+    "domain_type": "real",
+    "is_night": false,
+    "products": ["101W12"],
+    "orderbook_levels": 20,
+    "product_info_refresh_sec": 300,
+    "broadcast_host_address": "0.0.0.0",
+    "broadcast_port": 8888,
+    "products_db_base_path": "products",
+    "orderbook_save_path": "orderbook_record",
+    "trade_save_path": "trade_record",
+    "timezone_minute_offset": 540,
+    "market_end_intraday_minute": -1,
+    "log_path": "logs/listener.log"
+  }
+}

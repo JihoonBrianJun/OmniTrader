@@ -150,8 +150,8 @@ static void update_websocket_access_token(const std::string& token_save_path, qu
 
 
 void update_access_tokens(quill::Logger* logger) {
-    update_rest_access_token("./config/kis/rest_access.json", logger);
-    update_websocket_access_token("./config/kis/websocket_access.json", logger);
+    update_rest_access_token("./account/kis/rest_access.json", logger);
+    update_websocket_access_token("./account/kis/websocket_access.json", logger);
 }
 
 } // namespace Omni::KIS::Config

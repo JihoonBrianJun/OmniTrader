@@ -30,8 +30,8 @@ std::pair<bool, T> read_config_file(const std::string& file_path) {
 }
 
 // Base directory holding one exchange's credential/account files, e.g.
-// "./config/binance".
-std::string config_dir(const std::string& exchange);
+// "./account/binance".
+std::string account_dir(const std::string& exchange);
 
 // Path to one exchange's domain-endpoints file, e.g. "./domain/binance.json".
 std::string domain_file(const std::string& exchange);

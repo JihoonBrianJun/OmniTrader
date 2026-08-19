@@ -19,7 +19,7 @@ struct AccountInfo {
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(AccountInfo, front, rear, hts_id)
 std::pair<bool, AccountInfo> get_account_info(
-    const std::string& account_info_path = "./config/kis/account_info.json"
+    const std::string& account_info_path = "./account/kis/account_info.json"
 );
 
 struct RestAccessResponse {
@@ -38,10 +38,10 @@ struct RestAccessConfig {
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(RestAccessConfig, access_token, access_token_expire_time)
 std::pair<bool, RestAccessConfig> get_rest_access_config(
-    const std::string& rest_token_path = "./config/kis/rest_access.json"
+    const std::string& rest_token_path = "./account/kis/rest_access.json"
 );
 std::pair<bool, std::string> get_rest_access_token(
-    const std::string& rest_token_path = "./config/kis/rest_access.json"
+    const std::string& rest_token_path = "./account/kis/rest_access.json"
 );
 
 struct WebsocketAccessResponse {
@@ -55,10 +55,10 @@ struct WebsocketAccessConfig {
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WebsocketAccessConfig, access_token, access_token_expire_time)
 std::pair<bool, WebsocketAccessConfig> get_websocket_access_config(
-    const std::string& websocket_token_path = "./config/kis/websocket_access.json"
+    const std::string& websocket_token_path = "./account/kis/websocket_access.json"
 );
 std::pair<bool, std::string> get_websocket_access_token(
-    const std::string& websocket_token_path = "./config/kis/websocket_access.json"
+    const std::string& websocket_token_path = "./account/kis/websocket_access.json"
 );
 
 // Refresh REST + websocket session tokens if expired (writes config files).

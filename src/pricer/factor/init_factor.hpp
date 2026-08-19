@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 #include <argparse/argparse.hpp>
+#include <nlohmann/json.hpp>
 
 #include "microprice_factor.hpp"
 
@@ -14,6 +15,13 @@ namespace Omni::Pricer {
 std::unique_ptr<BaseFactor> init_factor(
     const FactorConfig& factor_config,
     const argparse::ArgumentParser& program
+);
+
+// JSON counterpart of init_factor: builds the factor named by `factor_config` from
+// the "factor_params" section of the pricer's factor launch-config file.
+std::unique_ptr<BaseFactor> init_factor_from_json(
+    const FactorConfig& factor_config,
+    const nlohmann::json& doc
 );
 
 // Registers factor-specific CLI args for the given factor name.

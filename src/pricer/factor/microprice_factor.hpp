@@ -20,6 +20,12 @@ struct MicropriceParams {
     void init(const argparse::ArgumentParser& program) {
         imbalance_exponent = program.get<double>("--imbalance_exponent");
     }
+
+    void parse_json(const nlohmann::json& doc) {
+        Omni::Config::JsonSection s(doc, "factor_params");
+        s.get("imbalance_exponent", imbalance_exponent);
+        s.done();
+    }
 };
 
 

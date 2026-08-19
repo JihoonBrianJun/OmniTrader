@@ -5,9 +5,11 @@
 #include <variant>
 #include <cstdint>
 #include <argparse/argparse.hpp>
+#include <nlohmann/json.hpp>
 
 #include "common/market_msg_types.hpp"
 #include "common/feed_msg_types.hpp"
+#include "config_handlers/json_config.hpp"
 #include "pricer/fair_price/fair_price.hpp"
 
 namespace Omni::Pricer {
@@ -82,6 +84,38 @@ struct PricerConfig {
         timezone_minute_offset = program.get<int64_t>("--timezone_minute_offset");
         market_end_intraday_minute = program.get<int64_t>("--market_end_intraday_minute");
         log_path = program.get<std::string>("--log_path");
+    }
+
+    // File-based alternative to init(): reads the same fields from the
+    // "pricer_config" section of a launch-config document (config/<exchange>/
+    // pricer0.json). Absent fields keep the defaults above.
+    void parse_json(const nlohmann::json& doc) {
+        Omni::Config::JsonSection s(doc, "pricer_config");
+        if (s.has("fair_price_mode")) {
+            std::string mode_name;
+            s.get("fair_price_mode", mode_name);
+            mode = fair_price_mode_from_string(mode_name);
+        }
+        s.skip("fair_price_mode");
+        // Same SYMBOL[:category] tokens the CLI takes, as a JSON array.
+        if (s.has("products")) {
+            std::vector<std::string> tokens;
+            s.get("products", tokens);
+            products.clear();
+            for (const auto& token : tokens) {
+                products.push_back(product_spec_from_token(token));
+            }
+        }
+        s.skip("products");
+        s.get("broadcast_host_address", broadcast_host_address);
+        s.get("broadcast_port", broadcast_port);
+        s.get("publish_host_address", publish_host_address);
+        s.get("publish_port", publish_port);
+        s.get("publish_interval_ms", publish_interval_ms);
+        s.get("timezone_minute_offset", timezone_minute_offset);
+        s.get("market_end_intraday_minute", market_end_intraday_minute);
+        s.get("log_path", log_path);
+        s.done();
     }
 };
 

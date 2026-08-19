@@ -15,6 +15,19 @@ std::unique_ptr<BaseFactor> init_factor(
 }
 
 
+std::unique_ptr<BaseFactor> init_factor_from_json(
+    const FactorConfig& factor_config,
+    const nlohmann::json& doc
+) {
+    if (factor_config.factor_name == "Microprice") {
+        MicropriceParams params;
+        params.parse_json(doc);
+        return std::make_unique<MicropriceFactor>(factor_config, params);
+    }
+    return nullptr;
+}
+
+
 void set_factor_specific_parser(
     const std::string& factor_name, argparse::ArgumentParser& program
 ) {

@@ -4,9 +4,11 @@
 #include <variant>
 #include <cstdint>
 #include <argparse/argparse.hpp>
+#include <nlohmann/json.hpp>
 
 #include "common/market_msg_types.hpp"
 #include "common/feed_msg_types.hpp"
+#include "config_handlers/json_config.hpp"
 #include "trader/order_gateway/order_gateway_dtypes.hpp"
 
 namespace Omni::Trader {
@@ -132,6 +134,61 @@ struct TraderConfig {
         market_end_intraday_minute = program.get<int64_t>("--market_end_intraday_minute");
         log_base_path = program.get<std::string>("--log_base_path");
         log_path = program.get<std::string>("--log_path");
+    }
+
+    // File-based alternative to init(): reads the same fields from the
+    // "trader_config" section of a launch-config document (config/<exchange>/
+    // trader0.json). Absent fields keep the defaults above.
+    void parse_json(const nlohmann::json& doc) {
+        Omni::Config::JsonSection s(doc, "trader_config");
+        s.get("exchange", exchange);
+        s.get("strategy_name", strategy_name);
+        s.get("region", region);
+        s.get("market_type", market_type);
+        // Tokens are SYMBOL[:category], as on the CLI. trade_products keeps bare
+        // symbols; subscribe_products keeps specs and falls back to the trade
+        // products when the key is absent or empty.
+        std::vector<ProductSpec> trade_specs;
+        if (s.has("trade_products")) {
+            std::vector<std::string> tokens;
+            s.get("trade_products", tokens);
+            trade_products.clear();
+            for (const auto& token : tokens) {
+                auto spec = product_spec_from_token(token);
+                trade_products.push_back(spec.product);
+                trade_specs.push_back(spec);
+            }
+        } else {
+            for (const auto& product : trade_products) {
+                trade_specs.push_back(product_spec_from_token(product));
+            }
+        }
+        s.skip("trade_products");
+
+        std::vector<std::string> subscribe_tokens;
+        s.get("subscribe_products", subscribe_tokens);
+        subscribe_same_products = subscribe_tokens.empty();
+        subscribe_products.clear();
+        if (subscribe_same_products) {
+            subscribe_products = trade_specs;
+        } else {
+            for (const auto& token : subscribe_tokens) {
+                subscribe_products.push_back(product_spec_from_token(token));
+            }
+        }
+
+        s.get("broadcast_host_address", broadcast_host_address);
+        s.get("broadcast_port", broadcast_port);
+        s.get("pricer_host_address", pricer_host_address);
+        s.get("pricer_port", pricer_port);
+        s.get("fair_price_max_age_ms", fair_price_max_age_ms);
+        s.get("domain_type", domain_type);
+        s.get("order_update_interval_ms", order_update_interval_ms);
+        s.get("timezone_minute_offset", timezone_minute_offset);
+        s.get("market_end_intraday_minute", market_end_intraday_minute);
+        s.get("log_base_path", log_base_path);
+        s.get("log_path", log_path);
+        s.done();
     }
 };
 

@@ -149,11 +149,55 @@ libcurl, websocketpp, concurrentqueue, openssl) are resolved by conan.
 
 ## Configuration
 
+Credentials and launch configuration are kept in separate trees: `account/` holds
+secrets and is gitignored, `config/` holds launch configs and is committed.
+
 - `domain/<exchange>.json` — flat `{name: url}` map of endpoints (committed).
-- `config/<exchange>/auth_keys.json` — `{"key","secret"}` API credentials
+- `account/<exchange>/auth_keys.json` — `{"key","secret"}` API credentials
   (gitignored; see the `*.example.json` templates).
-- KIS additionally uses `config/kis/account_info.json` and runtime-written
-  `config/kis/rest_access.json` / `websocket_access.json`.
+- KIS additionally uses `account/kis/account_info.json` and runtime-written
+  `account/kis/rest_access.json` / `websocket_access.json`.
+- `config/<exchange>/*.json` — launch configs, the file-based alternative to the CLI
+  (committed).
+
+### Launch configs
+
+Every process can be started either from flags or from JSON files; the two forms are
+equivalent and cannot be mixed on one command line. Each config struct that has
+`set_parser()`/`init()` also has a `parse_json()` reading the same fields.
+
+```
+config/<exchange>/
+  listener0.json   { "listener_config": { ... } }
+  pricer0.json     { "pricer_config":   { ... } }
+  factor0.json     { "factor_config":   { ... }, "factor_params": { ... } }
+  trader0.json     { "trader_config":   { ... } }
+  market0.json     { "market_config":   { ... } }
+  strategy0.json   { "strategy_params": { ... } }
+```
+
+```bash
+build/listener config/binance/listener0.json
+build/pricer   config/binance/pricer0.json config/binance/factor0.json
+build/trader   config/binance/trader0.json config/binance/market0.json \
+               config/binance/strategy0.json
+```
+
+The trailing `0` is the default file name; further variants (`trader1.json`, …) are
+added alongside and named explicitly. The files are split by what changes together:
+wiring (listener/pricer/trader), the venue's price/quantity units (market, shared by
+every trader on that exchange) and the strategy's parameters (swapped per run).
+
+The pricer's factor file is only required in `FACTOR` mode — `MID` and `VWAP` need no
+factor configuration, exactly as on the CLI. The market file may omit `exchange` and
+inherit it from the trader config; if it states one, the two must agree.
+
+Field names match the CLI flags without the `--` prefix, with two exceptions in
+`factor_config`, where the flag prefix is dropped: `--factor_ema_alpha` is
+`ema_alpha` and `--factor_cap_bp` is `cap_bp`. Any field may be omitted to take its
+default, but an *unrecognized* field is an error rather than being ignored — a
+misspelled `order_lts` would otherwise leave the trader silently running at zero size.
+The batch sweep parameters (`--spread_param_num` and friends) are CLI-only.
 
 ### Product arguments
 
@@ -289,6 +333,10 @@ parameters are all the pricer's, which is what lets one definition serve every t
 ```bash
 build/listener --exchange kis --region korea --market_type derivatives --products 101W12
 build/trader  --exchange kis --region korea --market_type stock --trade_products 005930
+
+# or, equivalently, from launch configs
+build/listener config/kis/listener0.json
+build/trader   config/kis/trader0.json config/kis/market0.json config/kis/strategy0.json
 ```
 
 KIS has no spot/futures/asset distinction, so the `:category` suffix is unnecessary

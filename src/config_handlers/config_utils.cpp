@@ -2,8 +2,8 @@
 
 namespace Omni::Config {
 
-std::string config_dir(const std::string& exchange) {
-    return fmt::format("./config/{}", exchange);
+std::string account_dir(const std::string& exchange) {
+    return fmt::format("./account/{}", exchange);
 }
 
 
@@ -14,7 +14,7 @@ std::string domain_file(const std::string& exchange) {
 
 std::pair<bool, AuthKeys> get_auth_keys(const std::string& exchange) {
     return read_config_file<AuthKeys>(
-        fmt::format("{}/auth_keys.json", config_dir(exchange))
+        fmt::format("{}/auth_keys.json", account_dir(exchange))
     );
 }
 

@@ -4,8 +4,10 @@
 #include <variant>
 #include <cstdint>
 #include <argparse/argparse.hpp>
+#include <nlohmann/json.hpp>
 
 #include "common/market_msg_types.hpp"
+#include "config_handlers/json_config.hpp"
 
 namespace Omni::Listener {
 
@@ -90,6 +92,42 @@ struct ListenerConfig {
         broadcast_port = static_cast<unsigned short>(program.get<int>("--broadcast_port"));
         domain_type = program.get<std::string>("--domain_type");
         log_path = program.get<std::string>("--log_path");
+    }
+
+    // File-based alternative to init(): reads the same fields from the
+    // "listener_config" section of a launch-config document (config/<exchange>/
+    // listener0.json). Absent fields keep the defaults above.
+    void parse_json(const nlohmann::json& doc) {
+        Omni::Config::JsonSection s(doc, "listener_config");
+        s.get("exchange", exchange);
+        s.get("region", region);
+        s.get("market_type", market_type);
+        s.get("is_night", is_night);
+        s.get("timezone_minute_offset", timezone_minute_offset);
+        s.get("market_end_intraday_minute", market_end_intraday_minute);
+        // Same SYMBOL[:category] tokens the CLI takes, as a JSON array.
+        if (s.has("products")) {
+            std::vector<std::string> tokens;
+            s.get("products", tokens);
+            products.clear();
+            product_specs.clear();
+            for (const auto& token : tokens) {
+                auto spec = product_spec_from_token(token);
+                products.push_back(spec.product);
+                product_specs.push_back(spec);
+            }
+        }
+        s.skip("products");
+        s.get("products_db_base_path", products_db_base_path);
+        s.get("orderbook_save_path", orderbook_save_path);
+        s.get("trade_save_path", trade_save_path);
+        s.get("orderbook_levels", orderbook_levels);
+        s.get("product_info_refresh_sec", product_info_refresh_sec);
+        s.get("broadcast_host_address", broadcast_host_address);
+        s.get("broadcast_port", broadcast_port);
+        s.get("domain_type", domain_type);
+        s.get("log_path", log_path);
+        s.done();
     }
 };
 

@@ -1,0 +1,20 @@
+{
+  "trader_config": {
+    "exchange": "binance",
+    "strategy_name": "Geuant",
+    "market_type": "derivatives",
+    "domain_type": "real",
+    "trade_products": ["BTCUSDT:futures"],
+    "subscribe_products": [],
+    "broadcast_host_address": "0.0.0.0",
+    "broadcast_port": 8888,
+    "pricer_host_address": "0.0.0.0",
+    "pricer_port": 8889,
+    "fair_price_max_age_ms": 1000,
+    "order_update_interval_ms": 1000,
+    "timezone_minute_offset": 0,
+    "market_end_intraday_minute": -1,
+    "log_base_path": "./log",
+    "log_path": "logs/trader.log"
+  }
+}

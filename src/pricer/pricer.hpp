@@ -1,9 +1,10 @@
 #pragma once
 
-#include <memory>
 #include <map>
+#include <memory>
 #include <string>
 #include <thread>
+#include <functional>
 
 #include <quill/Logger.h>
 #include <moodycamel/blockingconcurrentqueue.h>
@@ -36,10 +37,16 @@ namespace Omni::Pricer {
 // use it as the fallback whenever this feed is unavailable.
 class Pricer {
 public:
+    // Builds one factor instance. Factors are stateful per product, so this is
+    // called once per configured product. Taking a builder rather than a parser is
+    // what lets the pricer be launched either from flags or from a JSON config
+    // without the service itself knowing which.
+    using FactorBuilder = std::function<std::unique_ptr<BaseFactor>()>;
+
     Pricer(
         const PricerConfig& config,
         const FactorConfig& factor_config,
-        const argparse::ArgumentParser& program,
+        const FactorBuilder& make_factor,
         quill::Logger* logger
     );
     ~Pricer();

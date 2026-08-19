@@ -3,8 +3,10 @@
 #include <string>
 #include <optional>
 #include <argparse/argparse.hpp>
+#include <nlohmann/json.hpp>
 
 #include "pricer/market_state.hpp"
+#include "config_handlers/json_config.hpp"
 
 // Mirrors the trader's strategy module (base_strategy / geuant_strategy /
 // init_strategy): a common config carried by the base class, per-implementation
@@ -40,6 +42,17 @@ struct FactorConfig {
         factor_name = program.get<std::string>("--factor_name");
         ema_alpha = program.get<double>("--factor_ema_alpha");
         cap_bp = program.get<double>("--factor_cap_bp");
+    }
+
+    // File-based alternative to init(): reads the "factor_config" section of the
+    // pricer's second launch-config file (config/<exchange>/factor0.json), which
+    // carries this alongside the chosen factor's own "factor_params" section.
+    void parse_json(const nlohmann::json& doc) {
+        Omni::Config::JsonSection s(doc, "factor_config");
+        s.get("factor_name", factor_name);
+        s.get("ema_alpha", ema_alpha);
+        s.get("cap_bp", cap_bp);
+        s.done();
     }
 };
 

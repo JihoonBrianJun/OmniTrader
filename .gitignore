@@ -3,6 +3,6 @@ build/
 logs/
 orderbook_record/
 trade_record/
-config/*
+account/*
 **/__pycache__/
 *.pyc

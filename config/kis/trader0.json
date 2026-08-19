@@ -1,0 +1,21 @@
+{
+  "trader_config": {
+    "exchange": "kis",
+    "strategy_name": "Geuant",
+    "region": "korea",
+    "market_type": "stock",
+    "domain_type": "real",
+    "trade_products": ["005930"],
+    "subscribe_products": [],
+    "broadcast_host_address": "0.0.0.0",
+    "broadcast_port": 8888,
+    "pricer_host_address": "0.0.0.0",
+    "pricer_port": 8889,
+    "fair_price_max_age_ms": 1000,
+    "order_update_interval_ms": 1000,
+    "timezone_minute_offset": 540,
+    "market_end_intraday_minute": -1,
+    "log_base_path": "./log",
+    "log_path": "logs/trader.log"
+  }
+}

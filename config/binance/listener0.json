@@ -1,0 +1,18 @@
+{
+  "listener_config": {
+    "exchange": "binance",
+    "market_type": "derivatives",
+    "domain_type": "real",
+    "products": ["BTCUSDT:futures"],
+    "orderbook_levels": 20,
+    "product_info_refresh_sec": 300,
+    "broadcast_host_address": "0.0.0.0",
+    "broadcast_port": 8888,
+    "products_db_base_path": "products",
+    "orderbook_save_path": "orderbook_record",
+    "trade_save_path": "trade_record",
+    "timezone_minute_offset": 0,
+    "market_end_intraday_minute": -1,
+    "log_path": "logs/listener.log"
+  }
+}

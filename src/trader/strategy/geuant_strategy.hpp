@@ -83,6 +83,32 @@ struct GeuantParams {
             program.get<double>("--skew_ratio")
         );
     }
+
+    // File-based alternative to init(): reads the "strategy_params" section of the
+    // trader's third launch-config file (config/<exchange>/strategy0.json). Covers
+    // the same fields init() does; the batch sweep params (--spread_param_num and
+    // friends) are CLI-only, since batch_init is not reachable from an entrypoint.
+    void parse_json(const nlohmann::json& doc) {
+        Omni::Config::JsonSection s(doc, "strategy_params");
+        s.get("spread_const_bp", spread_const_bp);
+        s.get("skew_ratio", skew_ratio);
+        s.get("use_spread_cap", use_spread_cap);
+        s.get("spread_cap_bp", spread_cap_bp);
+        s.get("use_bbo_cap_buffer", use_bbo_cap_buffer);
+        s.get("bbo_cap_buffer_bp", bbo_cap_buffer_bp);
+
+        s.get("order_lots", order_lots);
+        s.get("order_dollar", order_dollar);
+        s.get("position_limit_in_lots", position_limit_in_lots);
+        s.get("position_in_dollar", position_in_dollar);
+        s.get("position_limit_in_dollar", position_limit_in_dollar);
+
+        s.get("order_num", order_num);
+        s.get("order_interval_bp", order_interval_bp);
+        s.get("tick_based_order_interval", tick_based_order_interval);
+        s.get("order_interval_ticks", order_interval_ticks);
+        s.done();
+    }
 };
 
 void batch_init(

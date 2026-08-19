@@ -1,0 +1,10 @@
+{
+  "factor_config": {
+    "factor_name": "Microprice",
+    "ema_alpha": 1.0,
+    "cap_bp": 20.0
+  },
+  "factor_params": {
+    "imbalance_exponent": 1.0
+  }
+}

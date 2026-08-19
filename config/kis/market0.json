@@ -1,0 +1,8 @@
+{
+  "market_config": {
+    "exchange": "kis",
+    "min_tick_size": 1.0,
+    "default_lot_size": 1.0,
+    "short_sell_unable": true
+  }
+}

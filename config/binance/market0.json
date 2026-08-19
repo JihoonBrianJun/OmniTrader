@@ -1,0 +1,8 @@
+{
+  "market_config": {
+    "exchange": "binance",
+    "min_tick_size": 0.1,
+    "default_lot_size": 0.001,
+    "short_sell_unable": false
+  }
+}
