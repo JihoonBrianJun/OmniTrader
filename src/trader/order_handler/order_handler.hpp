@@ -172,6 +172,11 @@ private:
     void flatten_positions(long deadline_ns);
     void submit_market_flatten(const std::string& product, ProductState& state);
     bool no_orders_outstanding() const;
+    // Is there an order we could send a cancel for right now -- one whose place has
+    // been acked (so it has an exchange order_no) with no cancel already in flight?
+    // The shutdown waits on this rather than on a fixed slice, so a place ack that
+    // lands early is acted on immediately instead of after the rest of the slice.
+    bool any_cancellable() const;
     bool all_flat() const;
     std::string format_residual() const;
     // Qualifies a residual report when the link that would confirm it is down.

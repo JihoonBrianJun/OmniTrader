@@ -859,6 +859,17 @@ bool OrderHandler::no_orders_outstanding() const {
 }
 
 
+bool OrderHandler::any_cancellable() const {
+    for (const auto& [product, state] : product_states_) {
+        for (const auto& [cid, order] : state.outstanding_orders) {
+            if (state.response_waiting.response_waiting_cancel_orders.count(cid)) continue;
+            if (state.cid_to_order_no.count(cid)) return true;
+        }
+    }
+    return false;
+}
+
+
 bool OrderHandler::all_flat() const {
     for (const auto& [product, state] : product_states_) {
         if (state.position_in_lots != 0) return false;
@@ -913,12 +924,23 @@ void OrderHandler::cancel_all_orders(long deadline_ns) {
                 ++sent;
             }
         }
-        if (sent == 0 && unacked == 0) break;
-        LOG_INFO(
-            logger_, "[Shutdown] cancel round: sent={} awaiting_place_ack={}", sent, unacked
-        );
+        if (sent > 0 || unacked > 0) {
+            LOG_INFO(
+                logger_, "[Shutdown] cancel round: sent={} awaiting_place_ack={}", sent, unacked
+            );
+        }
+        // Wakes on the first thing worth reacting to rather than sitting out the whole
+        // slice: either everything is gone, or a place ack has landed and turned an
+        // order we could not cancel into one we can. That difference is the length of
+        // time live orders stay live -- a fixed 200 ms wait after acks that arrived in
+        // 90 ms is 110 ms of nothing happening with quotes still working.
+        //
+        // sent == 0 && unacked == 0 means every outstanding order already has a cancel
+        // in flight. That is a reason to wait here for the acks, not to give up: an
+        // earlier version broke out of the loop and reported a timeout it had never
+        // actually waited for.
         pump_until(
-            [this]() { return no_orders_outstanding(); },
+            [this]() { return no_orders_outstanding() || any_cancellable(); },
             std::min<long>(get_curr_tstamp_ns() + 200L * 1000000, deadline_ns)
         );
     }

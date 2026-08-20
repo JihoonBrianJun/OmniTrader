@@ -136,8 +136,17 @@ int main(int argc, char* argv[]) {
     );
     try {
         order_handler->shutdown();
+        // To the console as well as the log. Everything else this process says goes
+        // to a file, so without this the operator has no way to tell a finished
+        // shutdown from a hung one -- and the way that ends is a second Ctrl-C
+        // landing in the middle of the cancel sequence.
+        std::cerr << "[trader] shutdown finished; see " << config.log_path
+                  << " for what it cancelled and closed" << std::endl;
     } catch (const std::exception& e) {
         LOG_ERROR(logger, "Exception during shutdown: {}", e.what());
+        std::cerr << "[trader] shutdown failed: " << e.what()
+                  << " -- check the exchange for live orders and open positions"
+                  << std::endl;
     }
 
     return 0;

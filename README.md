@@ -252,9 +252,15 @@ or the configured market close -- it runs a bounded shutdown:
 Nothing the process placed is left working, on any path -- including the one where
 flattening is turned off or gives up.
 
-A **second** signal is not swallowed. It restores the default disposition and
-re-raises, so a shutdown that is hanging can always be cut short; that leaves orders
-behind, which is the operator's call to make.
+Ctrl-C prints what it is doing **to the console**, and so does the finish. The trader
+otherwise logs only to a file, so a silent Ctrl-C reads as a hang -- and the reflex
+that follows is another Ctrl-C, landing in the middle of the cancel sequence.
+
+For the same reason a **repeat signal inside the first 5 seconds is ignored** (it is
+almost always the same keystroke twice). After that, a repeat restores the default
+disposition and re-raises, so a shutdown that really is hanging can always be cut
+short. That leaves orders working at the exchange, which is the operator's call to
+make once they have actually waited -- the console says as much before it exits.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
