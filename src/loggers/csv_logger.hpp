@@ -25,6 +25,7 @@ class CsvLogger {
                         quill::RotatingFileSinkConfig cfg;
                         cfg.set_open_mode('a');
                         cfg.set_rotation_max_file_size(100*1024*1024);
+                        cfg.set_max_backup_files(16);
                         return cfg;
                     }()
                 )
