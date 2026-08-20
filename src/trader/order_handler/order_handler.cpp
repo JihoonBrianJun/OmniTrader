@@ -40,6 +40,8 @@ OrderHandler::OrderHandler(
 )
 :   logger_(logger),
     market_config_(market_config),
+    exchange_(config.exchange),
+    timezone_minute_offset_(config.timezone_minute_offset),
     min_tick_size_(market_config.min_tick_size),
     default_lot_size_(market_config.default_lot_size),
     strategy_(strategy),
@@ -59,6 +61,8 @@ OrderHandler::OrderHandler(
     order_gateway_(
         make_gateway ? make_gateway(config, logger) : create_order_gateway(config, logger)
     ),
+    order_record_save_path_(config.order_record_save_path),
+    order_decision_save_path_(config.order_decision_save_path),
     io_context_(std::make_unique<boost::asio::io_context>()),
     listener_connecting_(false),
     listener_connected_(false),
@@ -399,9 +403,128 @@ void OrderHandler::forget_order(ProductState& state, uint64_t cid) {
 }
 
 
+Logger::CsvLogger<OrderRecordCsvSchema>* OrderHandler::get_order_record_logger(
+    const std::string& product
+) {
+    if (order_record_save_path_.empty()) return nullptr;   // record turned off
+    auto it = order_record_loggers_.find(product);
+    if (it != order_record_loggers_.end()) return it->second.get();
+
+    auto curr_date = get_curr_date(timezone_minute_offset_);
+    auto csv = std::make_shared<Logger::CsvLogger<OrderRecordCsvSchema>>(
+        fmt::format("{}_{}_order_record_logger", exchange_, product),
+        fmt::format(
+            "{}/{}/{}/{}.log", order_record_save_path_, exchange_, product, curr_date
+        )
+    );
+    order_record_loggers_[product] = csv;
+    return csv.get();
+}
+
+
+Logger::CsvLogger<OrderDecisionCsvSchema>* OrderHandler::get_order_decision_logger(
+    const std::string& product
+) {
+    if (order_decision_save_path_.empty()) return nullptr;   // record turned off
+    auto it = order_decision_loggers_.find(product);
+    if (it != order_decision_loggers_.end()) return it->second.get();
+
+    auto curr_date = get_curr_date(timezone_minute_offset_);
+    auto csv = std::make_shared<Logger::CsvLogger<OrderDecisionCsvSchema>>(
+        fmt::format("{}_{}_order_decision_logger", exchange_, product),
+        fmt::format(
+            "{}/{}/{}/{}.log", order_decision_save_path_, exchange_, product, curr_date
+        )
+    );
+    order_decision_loggers_[product] = csv;
+    return csv.get();
+}
+
+
+void OrderHandler::mark_pending_record(
+    uint64_t cid, const std::string& product, const char* type,
+    bool is_bid, double price, double qty
+) {
+    // Kept even with the record turned off: it is one small entry per in-flight
+    // request, and dropping it here would mean branching on the switch in three
+    // places instead of one.
+    pending_order_records_[cid] = PendingOrderRecord{
+        .product = product, .type = type, .is_bid = is_bid, .price = price, .qty = qty
+    };
+}
+
+
+void OrderHandler::log_order_record(
+    const std::string& product, uint64_t cid, const std::string& order_no,
+    const char* type, bool success
+) {
+    // Popped unconditionally, so the map stays bounded by what is actually in flight
+    // whether or not the record is being written.
+    PendingOrderRecord record;
+    bool have_pending = false;
+    auto it = pending_order_records_.find(cid);
+    if (it != pending_order_records_.end()) {
+        record = it->second;
+        have_pending = true;
+        pending_order_records_.erase(it);
+    }
+
+    auto* csv = get_order_record_logger(product);
+    if (!csv) return;
+    csv->write_log(
+        get_curr_tstamp_ns(), product, cid,
+        order_no.empty() ? "-" : order_no.c_str(),
+        have_pending ? record.type : type,
+        // Only knowable from the request; a reply on its own does not say which side.
+        have_pending ? (record.is_bid ? "bid" : "ask") : "-",
+        success,
+        have_pending ? record.price : NAN,
+        have_pending ? record.qty : NAN
+    );
+}
+
+
+void OrderHandler::log_order_decision(
+    const std::string& product, const PriceInfo& price_info, const ProductState& state,
+    const std::map<int64_t, int32_t>& bid_place_orders,
+    const std::map<int64_t, int32_t>& ask_place_orders
+) {
+    auto* csv = get_order_decision_logger(product);
+    if (!csv) return;
+    // The top of each side's ladder -- highest bid, lowest ask -- so a multi-level
+    // quote still reduces to the two numbers that say where it stood.
+    double bid_price = bid_place_orders.empty()
+        ? NAN : to_double_price(bid_place_orders.rbegin()->first);
+    double ask_price = ask_place_orders.empty()
+        ? NAN : to_double_price(ask_place_orders.begin()->first);
+    csv->write_log(
+        get_curr_tstamp_ns(),
+        to_double_price(price_info.bbid_price_in_min_ticks),
+        to_double_price(price_info.bask_price_in_min_ticks),
+        price_info.mid_price, price_info.fair_price, price_info.applied_factor,
+        state.position_in_lots,
+        static_cast<int64_t>(state.outstanding_orders.size()),
+        bid_price, ask_price
+    );
+}
+
+
 void OrderHandler::on_order_response(const Omni::OrderGateway::OrderResponse& response) {
     auto cp = cid_to_product_.find(response.cid);
-    if (cp == cid_to_product_.end()) return;   // unknown, or already reconciled/forgotten
+    if (cp == cid_to_product_.end()) {
+        // Unknown, or already reconciled and forgotten -- the execution feed can
+        // report a fill or a rejection before the reply for the same order lands.
+        // There is no state left to update, but the request still gets its record row
+        // (and its pending entry dropped) if it was one of ours.
+        auto pending = pending_order_records_.find(response.cid);
+        if (pending != pending_order_records_.end()) {
+            log_order_record(
+                pending->second.product, response.cid, response.order_no,
+                pending->second.type, response.success
+            );
+        }
+        return;
+    }
     const std::string product = cp->second;
     auto& state = product_states_[product];
 
@@ -414,6 +537,9 @@ void OrderHandler::on_order_response(const Omni::OrderGateway::OrderResponse& re
     if (state.response_waiting.no_waiting_orders()) state.response_waiting_since_ns = 0;
 
     if (was_cancel) {
+        // Recorded before the forget below, which is what still holds the price, qty
+        // and side of the order being pulled.
+        log_order_record(product, response.cid, response.order_no, "cancel", response.success);
         // Cancel ack: drop the order on success; on failure leave it (still open).
         if (response.success) forget_order(state, response.cid);
         LOG_INFO(
@@ -425,6 +551,7 @@ void OrderHandler::on_order_response(const Omni::OrderGateway::OrderResponse& re
 
     // Place ack (or a late place reply the execution feed already reconciled): bind
     // the exchange order_no on success; drop the optimistic order if the place failed.
+    log_order_record(product, response.cid, response.order_no, "place", response.success);
     if (response.success) {
         if (!response.order_no.empty()) {
             state.cid_to_order_no[response.cid] = response.order_no;
@@ -645,6 +772,22 @@ void OrderHandler::update_orders(const std::string& product, bool do_liquidate) 
                 state.response_waiting.response_waiting_place_orders.size(),
                 state.response_waiting.response_waiting_cancel_orders.size()
             );
+            // Close these out in the record too, rather than leaving requests with no
+            // outcome (and their pending entries) behind. success=false here means no
+            // reply arrived in time -- not that the venue rejected it; such an order
+            // may well be live, and is reconciled later off the execution feed.
+            auto record_timed_out = [&](const std::set<uint64_t>& cids, const char* type) {
+                for (auto cid : cids) {
+                    auto on_it = state.cid_to_order_no.find(cid);
+                    log_order_record(
+                        product, cid,
+                        on_it != state.cid_to_order_no.end() ? on_it->second : "",
+                        type, false
+                    );
+                }
+            };
+            record_timed_out(state.response_waiting.response_waiting_place_orders, "place");
+            record_timed_out(state.response_waiting.response_waiting_cancel_orders, "cancel");
             state.response_waiting.response_waiting_place_orders.clear();
             state.response_waiting.response_waiting_cancel_orders.clear();
             state.response_waiting_since_ns = 0;
@@ -696,6 +839,9 @@ void OrderHandler::update_orders(const std::string& product, bool do_liquidate) 
         product, bid_place_orders.size(), ask_place_orders.size(),
         bid_cancel_orders.size(), ask_cancel_orders.size()
     );
+    // Written before the orders go out, so `outstanding` is what the strategy was
+    // looking at when it decided rather than what the decision left behind.
+    log_order_decision(product, price_info, state, bid_place_orders, ask_place_orders);
 
     // Orders are fired without blocking; their outcome arrives later via
     // on_order_response (or the execution feed). Cancels go first, so a replace frees
@@ -730,6 +876,14 @@ void OrderHandler::submit_cancel(
     Omni::OrderGateway::OrderCancelInfo info{
         .order_no = on_it->second, .product = product, .cid = cid
     };
+    auto oo_it = state.outstanding_orders.find(cid);
+    if (oo_it != state.outstanding_orders.end()) {
+        mark_pending_record(
+            cid, product, "cancel", oo_it->second.is_bid,
+            to_double_price(oo_it->second.price_in_min_ticks),
+            to_double_qty(oo_it->second.qty_in_lots)
+        );
+    }
     mark_waiting(state, state.response_waiting.response_waiting_cancel_orders, cid);
     order_gateway_->cancel_order(info);
     LOG_INFO(logger_, "[Order Cancel] {} cid={} order_no={} sent", product, cid, info.order_no);
@@ -800,6 +954,9 @@ void OrderHandler::submit_place(
         .cid = cid,
         .reduce_only = reduce_only
     };
+    // A market order carries no price, so the record gets NaN rather than the 0.0 the
+    // gateways send in its place.
+    mark_pending_record(cid, product, "place", is_bid, is_limit ? price : NAN, qty);
     order_gateway_->place_order(info);
     LOG_INFO(
         logger_, "[Order Place] {} cid={} is_bid={} type={} px={} qty={} reduce_only={} sent",

@@ -22,6 +22,25 @@ struct ResponseWaitingOrders {
     }
 };
 
+// What was actually sent for one order request, held from the moment it goes out
+// until its gateway reply lands. It exists only so the order-record csv can put the
+// request (side, price, qty, kind) and its outcome (success, order_no) on one row:
+// the reply carries neither, and by the time a cancel is acked the order it refers
+// to has been forgotten.
+struct PendingOrderRecord {
+    // Kept here as well as in cid_to_product_, because a reply can arrive after the
+    // execution feed already forgot the order, and the row still needs its product.
+    std::string product;
+    // "place" / "amend" / "cancel"; a literal, so no allocation on the order path.
+    const char* type = "place";
+    bool is_bid = false;
+    // For a place, what went to the venue: post-snap doubles, not the internal
+    // tick/lot counts (NaN price for a market order, which carries none). For a
+    // cancel, the resting order being pulled, as the trader had it recorded.
+    double price = 0.0;
+    double qty = 0.0;
+};
+
 // Per-traded-product live state. Outstanding orders are keyed by an internal client
 // id (cid, mirroring the backtest) and mapped to the exchange order id (order_no).
 struct ProductState {

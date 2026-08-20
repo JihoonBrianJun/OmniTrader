@@ -85,6 +85,13 @@ struct TraderConfig {
     // account in Hedge Mode, which rejects the flag outright.
     bool shutdown_reduce_only = true;
 
+    // --- CSV records ------------------------------------------------------------
+    // The trader's own csv trails, written in the same layout the listener uses for
+    // its orderbook/trade records: <save_path>/<exchange>/<product>/<date>.log.
+    // An empty path turns that record off.
+    std::string order_record_save_path = "order_record";
+    std::string order_decision_save_path = "order_decision";
+
     // Loop-control / logging.
     long timezone_minute_offset = 0;
     long market_end_intraday_minute = -1;
@@ -125,6 +132,8 @@ struct TraderConfig {
             .scan<'i', int64_t>().default_value(int64_t{5000});
         program.add_argument("--no_shutdown_market_flatten").flag();
         program.add_argument("--no_shutdown_reduce_only").flag();
+        program.add_argument("--order_record_save_path").default_value(std::string("order_record"));
+        program.add_argument("--order_decision_save_path").default_value(std::string("order_decision"));
         program.add_argument("--timezone_minute_offset").scan<'i', int64_t>().default_value(int64_t{0});
         program.add_argument("--market_end_intraday_minute").scan<'i', int64_t>().default_value(int64_t{-1});
         program.add_argument("--log_base_path").default_value(std::string("./log"));
@@ -168,6 +177,8 @@ struct TraderConfig {
         shutdown_flatten_timeout_ms = program.get<int64_t>("--shutdown_flatten_timeout_ms");
         shutdown_market_flatten = !program.get<bool>("--no_shutdown_market_flatten");
         shutdown_reduce_only = !program.get<bool>("--no_shutdown_reduce_only");
+        order_record_save_path = program.get<std::string>("--order_record_save_path");
+        order_decision_save_path = program.get<std::string>("--order_decision_save_path");
         timezone_minute_offset = program.get<int64_t>("--timezone_minute_offset");
         market_end_intraday_minute = program.get<int64_t>("--market_end_intraday_minute");
         log_base_path = program.get<std::string>("--log_base_path");
@@ -231,12 +242,39 @@ struct TraderConfig {
         s.get("shutdown_flatten_timeout_ms", shutdown_flatten_timeout_ms);
         s.get("shutdown_market_flatten", shutdown_market_flatten);
         s.get("shutdown_reduce_only", shutdown_reduce_only);
+        s.get("order_record_save_path", order_record_save_path);
+        s.get("order_decision_save_path", order_decision_save_path);
         s.get("timezone_minute_offset", timezone_minute_offset);
         s.get("market_end_intraday_minute", market_end_intraday_minute);
         s.get("log_base_path", log_base_path);
         s.get("log_path", log_path);
         s.done();
     }
+};
+
+// One row per order action the trader took, written when the gateway's reply lands
+// so `success` and `order_no` are on the same row as the request that produced them.
+// `type` is place/amend/cancel and `side` is bid/ask. For a place, price/qty are the
+// values actually sent to the venue -- after the snap onto the product's grid, and
+// with a NaN price for a market order, which carries none. For a cancel they are the
+// resting order being pulled, as the trader had it recorded.
+//
+// `symbol` is carried even though the file is already per product, so records for
+// several products can be concatenated without losing which is which.
+struct OrderRecordCsvSchema {
+    static constexpr char const* header =
+        "local_tstamp,symbol,cid,order_no,type,side,success,price,qty";
+    static constexpr char const* format = "{},{},{},{},{},{},{},{},{}";
+};
+
+// One row per decision that reached the strategy: everything it was given, and the
+// best quote it asked for on each side (NaN when it wanted none there). Ticks that
+// never got as far as the strategy -- no book, stale link, awaiting replies -- write
+// no row; the trader log says why.
+struct OrderDecisionCsvSchema {
+    static constexpr char const* header =
+        "local_tstamp,bbid,bask,mid,fair,factor,position_lots,outstanding,bid_price,ask_price";
+    static constexpr char const* format = "{},{},{},{},{},{},{},{},{},{}";
 };
 
 } // namespace Omni::Trader

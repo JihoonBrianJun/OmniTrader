@@ -14,6 +14,7 @@
 #include <boost/asio.hpp>
 #include <boost/asio/steady_timer.hpp>
 
+#include "loggers/csv_logger.hpp"
 #include "trader/trader_dtypes.hpp"
 #include "trader/price_dtypes.hpp"
 #include "trader/strategy/base_strategy.hpp"
@@ -88,6 +89,8 @@ public:
 private:
     quill::Logger* logger_;
     MarketConfig market_config_;
+    const std::string exchange_;
+    const long timezone_minute_offset_;
     // The process-global normalization units. const: every int64 price and int32
     // quantity in this handler, in ProductState, and inside the strategy is a count
     // of these, so they cannot be rebased once anything has been recorded.
@@ -138,6 +141,17 @@ private:
     // amount, or asset balance for asset-category products). Logged each decision so
     // position/margin-side issues are visible.
     std::map<std::string, PositionData> positions_;
+
+    // --- CSV records ------------------------------------------------------------
+    // Per-product, opened on first use and laid out like the listener's records.
+    // Empty save path = that record is off, and its map simply stays empty.
+    const std::string order_record_save_path_;
+    const std::string order_decision_save_path_;
+    std::map<std::string, std::shared_ptr<Logger::CsvLogger<OrderRecordCsvSchema>>> order_record_loggers_;
+    std::map<std::string, std::shared_ptr<Logger::CsvLogger<OrderDecisionCsvSchema>>> order_decision_loggers_;
+    // Requests still awaiting a reply, keyed by cid. See PendingOrderRecord: it holds
+    // what the record row needs and the reply does not carry.
+    std::map<uint64_t, PendingOrderRecord> pending_order_records_;
 
     moodycamel::BlockingConcurrentQueue<Task> trader_queue_;
 
@@ -193,6 +207,26 @@ private:
     double to_double_price(int64_t price_in_min_ticks) const;
     double to_double_qty(int32_t qty_in_lots) const;
 
+
+    Logger::CsvLogger<OrderRecordCsvSchema>* get_order_record_logger(const std::string& product);
+    Logger::CsvLogger<OrderDecisionCsvSchema>* get_order_decision_logger(const std::string& product);
+    // Remember what a just-sent request was, so its reply can be recorded in full.
+    void mark_pending_record(
+        uint64_t cid, const std::string& product, const char* type,
+        bool is_bid, double price, double qty
+    );
+    // Write one order-record row and drop the pending entry. `type` is only consulted
+    // when there is no pending entry left to take it from (a reply for a request the
+    // execution feed already reconciled).
+    void log_order_record(
+        const std::string& product, uint64_t cid, const std::string& order_no,
+        const char* type, bool success
+    );
+    void log_order_decision(
+        const std::string& product, const PriceInfo& price_info, const ProductState& state,
+        const std::map<int64_t, int32_t>& bid_place_orders,
+        const std::map<int64_t, int32_t>& ask_place_orders
+    );
 
     void on_orderbook(const std::string& product, const OrderbookData& data);
     void on_execution(const std::string& product, const ExecutionData& data);

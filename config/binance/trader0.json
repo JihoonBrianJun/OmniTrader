@@ -19,6 +19,8 @@
     "shutdown_flatten_timeout_ms": 5000,
     "shutdown_market_flatten": true,
     "shutdown_reduce_only": true,
+    "order_record_save_path": "order_record",
+    "order_decision_save_path": "order_decision",
     "timezone_minute_offset": 0,
     "market_end_intraday_minute": -1,
     "log_base_path": "./log",
