@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <stdexcept>
 #include <chrono>
 #include <fmt/core.h>
@@ -142,9 +143,13 @@ void KisListener::worker_loop() {
 
 
 void KisListener::on_ws_status(const WsStatusUpdate& update) {
+    // Redial whenever the socket is down and not currently dialling. Keying this on
+    // the up->down transition (as it used to) meant a dial that never succeeded took
+    // no branch at all: a failed first connect was permanent, and a failed redial
+    // ended the chain after one attempt.
     if (!ws_client_opened_ && update.opened) {
         on_ws_client_open();
-    } else if (ws_client_opened_ && !update.opened) {
+    } else if (!update.opened && !update.connecting && !ws_client_reconnect_pending_.load()) {
         on_ws_client_fail();
     }
     ws_client_connecting_ = update.connecting;
@@ -157,7 +162,8 @@ void KisListener::on_ws_status(const WsStatusUpdate& update) {
 
 
 void KisListener::on_ws_client_open() {
-    ws_client_reconnect_cnt_ = 0;
+    ws_client_reconnect_cnt_.store(0);
+    ws_client_reconnect_pending_.store(false);
     for (const auto& subscription_message : subscription_messages_) {
         ws_client_->send(
             ws_client_->get_connection_hdl(),
@@ -171,19 +177,30 @@ void KisListener::on_ws_client_open() {
 
 void KisListener::on_ws_client_fail() {
     ws_client_.reset();
-    if (ws_client_reconnect_cnt_ >= 5) {
-        LOG_WARNING(logger_, "ws client reconnect failed for max (5) times");
-        return;
+    ws_client_reconnect_pending_.store(true);
+
+    // Keeps trying, with the wait capped rather than the attempts. Stopping after
+    // five meant a two-minute venue-side outage left the listener permanently mute
+    // with the process still running and apparently healthy -- market data simply
+    // never came back, and only a restart fixed it. A capped backoff costs one dial
+    // every 30s while the venue is away and recovers on its own when it returns.
+    constexpr int MAX_BACKOFF_STEP = 5;   // (1 << 5) - 1 = 31s
+    auto step = std::min(ws_client_reconnect_cnt_.fetch_add(1), MAX_BACKOFF_STEP);
+    if (ws_client_reconnect_cnt_.load() == MAX_BACKOFF_STEP + 1) {
+        LOG_WARNING(
+            logger_, "ws client reconnect has failed {} times; still retrying every {}s",
+            ws_client_reconnect_cnt_.load(), (1 << MAX_BACKOFF_STEP) - 1
+        );
     }
+
     ws_client_reconnect_timer_ = std::make_unique<boost::asio::steady_timer>(*io_context_);
-    ws_client_reconnect_timer_->expires_after(std::chrono::seconds(
-        (1 << (ws_client_reconnect_cnt_++)) - 1
-    ));
+    ws_client_reconnect_timer_->expires_after(std::chrono::seconds((1 << step) - 1));
     ws_client_reconnect_timer_->async_wait([this](const boost::system::error_code ec) {
         if (ec == boost::asio::error::operation_aborted) {
             return;
         } else if (!ec && running_.load()) {
-            LOG_INFO(logger_, "Trying {}th ws client reconnect", ws_client_reconnect_cnt_);
+            LOG_INFO(logger_, "Trying {}th ws client reconnect", ws_client_reconnect_cnt_.load());
+            ws_client_reconnect_pending_.store(false);
             create_ws_client();
         }
     });

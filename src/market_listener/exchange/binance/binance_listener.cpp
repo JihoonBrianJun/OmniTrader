@@ -42,6 +42,8 @@ BinanceListener::BinanceListener(
     user_opened_(false),
     market_reconnect_cnt_(0),
     user_reconnect_cnt_(0),
+    market_reconnect_pending_(false),
+    user_reconnect_pending_(false),
     io_context_(std::make_unique<boost::asio::io_context>()),
     running_(false)
 {
@@ -102,7 +104,14 @@ void BinanceListener::create_market_client() {
 void BinanceListener::create_user_client() {
     listen_key_ = rest_client_->create_listen_key();
     if (listen_key_.empty()) {
-        LOG_WARNING(logger_, "Could not obtain listenKey; user stream disabled");
+        // Not terminal. This is one REST call, and it fails for ordinary transient
+        // reasons; giving up here used to disable the user stream for the life of
+        // the process, which means no position and no fills -- the trader would go
+        // on quoting against a position it could not see.
+        LOG_WARNING(logger_, "Could not obtain listenKey; retrying the user stream");
+        if (running_.load() && !user_reconnect_pending_.exchange(true)) {
+            boost::asio::post(*io_context_, [this]() { schedule_user_reconnect(); });
+        }
         return;
     }
     auto status_cb = [this](bool connecting, bool opened) {
@@ -131,13 +140,21 @@ void BinanceListener::start() {
 
     worker_thread_ = std::thread([this]() { worker_loop(); });
 
-    create_market_client();
-    if (signer_) {
-        create_user_client();
-        schedule_keepalive();
-    } else {
-        LOG_WARNING(logger_, "No Binance credentials; user stream and signing disabled");
-    }
+    // Dialled from io_thread_ rather than here, so that every construction and every
+    // destruction of these clients happens on that one thread. A redial can be
+    // scheduled the moment a dial fails -- which can be before the assignment below
+    // has even returned -- and two threads owning the same unique_ptr is a race that
+    // only shows up when the venue is unreachable, i.e. exactly when reconnect
+    // behaviour matters.
+    boost::asio::post(*io_context_, [this]() {
+        create_market_client();
+        if (signer_) {
+            create_user_client();
+            schedule_keepalive();
+        } else {
+            LOG_WARNING(logger_, "No Binance credentials; user stream and signing disabled");
+        }
+    });
 }
 
 
@@ -158,15 +175,23 @@ void BinanceListener::stop() {
 }
 
 
+// Both schedulers run on io_thread_ (posted there by on_ws_status), so the timers
+// and the clients they replace are only ever touched from one thread.
 void BinanceListener::schedule_market_reconnect() {
     market_client_.reset();
     market_reconnect_timer_ = std::make_unique<boost::asio::steady_timer>(*io_context_);
     market_reconnect_timer_->expires_after(std::chrono::seconds(
-        std::min(1 << std::min(market_reconnect_cnt_++, 5), 30)
+        std::min(1 << std::min(market_reconnect_cnt_.fetch_add(1), 5), 30)
     ));
     market_reconnect_timer_->async_wait([this](const boost::system::error_code ec) {
+        // Cleared before the dial, not after: if this attempt fails too, its status
+        // has to be able to schedule the next one.
+        market_reconnect_pending_.store(false);
         if (!ec && running_.load()) {
-            LOG_INFO(logger_, "Reconnecting Binance market socket (attempt {})", market_reconnect_cnt_);
+            LOG_INFO(
+                logger_, "Reconnecting Binance market socket (attempt {})",
+                market_reconnect_cnt_.load()
+            );
             create_market_client();
         }
     });
@@ -177,11 +202,15 @@ void BinanceListener::schedule_user_reconnect() {
     user_client_.reset();
     user_reconnect_timer_ = std::make_unique<boost::asio::steady_timer>(*io_context_);
     user_reconnect_timer_->expires_after(std::chrono::seconds(
-        std::min(1 << std::min(user_reconnect_cnt_++, 5), 30)
+        std::min(1 << std::min(user_reconnect_cnt_.fetch_add(1), 5), 30)
     ));
     user_reconnect_timer_->async_wait([this](const boost::system::error_code ec) {
+        user_reconnect_pending_.store(false);
         if (!ec && running_.load()) {
-            LOG_INFO(logger_, "Reconnecting Binance user socket (attempt {})", user_reconnect_cnt_);
+            LOG_INFO(
+                logger_, "Reconnecting Binance user socket (attempt {})",
+                user_reconnect_cnt_.load()
+            );
             create_user_client();
         }
     });
@@ -236,20 +265,37 @@ void BinanceListener::worker_loop() {
 void BinanceListener::on_ws_status(const WsStatus& status) {
     const char* name = (status.socket == Socket::Market) ? "binance_market" : "binance_user";
 
+    // A socket is redialled whenever it is down and not currently dialling -- not
+    // only when it had previously been up.
+    //
+    // Keying the redial on the up->down transition looks right and is not: a dial
+    // that never succeeds reports (connecting=false, opened=false) with the socket
+    // never having been open, so neither branch fired and nothing was ever
+    // rescheduled. That made a failed *first* connect permanent (start the listener
+    // before the network is up, or during a venue outage, and it stays dead until
+    // someone restarts it), and it also cut every redial chain after a single
+    // attempt -- the backoff below could never reach its second step, because the
+    // attempt that failed looked exactly like a socket that had never been up.
     if (status.socket == Socket::Market) {
         if (!market_opened_ && status.opened) {
-            market_reconnect_cnt_ = 0;
+            market_reconnect_cnt_.store(0);
             on_market_open();
-        } else if (market_opened_ && !status.opened) {
-            schedule_market_reconnect();
+        } else if (!status.opened && !status.connecting) {
+            // Deduped: a drop can be reported by the close handler and the fail
+            // handler both, and the pong timeout can add a third.
+            if (!market_reconnect_pending_.exchange(true)) {
+                boost::asio::post(*io_context_, [this]() { schedule_market_reconnect(); });
+            }
         }
         market_opened_ = status.opened;
     } else {
         if (!user_opened_ && status.opened) {
-            user_reconnect_cnt_ = 0;
+            user_reconnect_cnt_.store(0);
             on_user_open();
-        } else if (user_opened_ && !status.opened) {
-            schedule_user_reconnect();
+        } else if (!status.opened && !status.connecting) {
+            if (!user_reconnect_pending_.exchange(true)) {
+                boost::asio::post(*io_context_, [this]() { schedule_user_reconnect(); });
+            }
         }
         user_opened_ = status.opened;
     }

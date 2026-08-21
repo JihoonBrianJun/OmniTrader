@@ -62,7 +62,11 @@ class BinanceListener : public IExchangeListener {
         std::unique_ptr<OB::BinanceWebsocketClient> market_client_, user_client_;
         std::string listen_key_;
         bool market_opened_, user_opened_;
-        int market_reconnect_cnt_, user_reconnect_cnt_;
+        // Backoff counters and "a redial is already scheduled" flags. Atomic because
+        // the status handler runs on worker_thread_ while the redial itself runs on
+        // io_thread_.
+        std::atomic<int> market_reconnect_cnt_, user_reconnect_cnt_;
+        std::atomic<bool> market_reconnect_pending_, user_reconnect_pending_;
 
         std::unique_ptr<boost::asio::io_context> io_context_;
         std::unique_ptr<boost::asio::steady_timer> market_reconnect_timer_, user_reconnect_timer_;

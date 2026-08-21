@@ -43,7 +43,10 @@ class KisListener : public IExchangeListener {
         moodycamel::BlockingConcurrentQueue<WsResponse> ws_response_queue_;
         std::unique_ptr<KisWebsocketClient> ws_client_;
         bool ws_client_connecting_, ws_client_opened_;
-        int ws_client_reconnect_cnt_;
+        // See BinanceListener for why a redial must not be keyed on the up->down
+        // transition alone, and why the "already scheduled" flag is needed.
+        std::atomic<int> ws_client_reconnect_cnt_;
+        std::atomic<bool> ws_client_reconnect_pending_{false};
         std::unique_ptr<boost::asio::steady_timer> ws_client_reconnect_timer_;
 
         std::unique_ptr<boost::asio::io_context> io_context_;
