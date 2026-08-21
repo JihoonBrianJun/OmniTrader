@@ -147,6 +147,82 @@ bash build.sh    # conan install + cmake + build  → build/listener, build/pric
 Requires conan and cmake. Dependencies (boost, fmt, quill, nlohmann_json, glaze,
 libcurl, websocketpp, concurrentqueue, openssl) are resolved by conan.
 
+### Amazon Linux 2023 (EC2) setup
+
+A fresh instance has none of this. The toolchain, gcc-14 (the distro default is too
+old for the C++23 this builds with), and the symlinks that give conan the compiler
+names it expects:
+
+```bash
+sudo dnf update
+sudo dnf install git cmake gcc-c++ make
+sudo dnf install gcc14 gcc14-c++
+sudo ln -s /usr/bin/gcc14-gcc /usr/local/bin/gcc-14
+sudo ln -s /usr/bin/gcc14-g++ /usr/local/bin/g++-14
+export CC=/usr/local/bin/gcc-14
+export CXX=/usr/local/bin/g++-14
+```
+
+The two `export`s last only for the current shell — append them to `~/.bashrc` as
+well, or the next login builds with the wrong compiler.
+
+Python and conan:
+
+```bash
+sudo dnf install python3 python3-pip
+sudo dnf install -y python3.11 python3.11-pip
+echo 'alias python=python3.11' >> ~/.bashrc
+source ~/.bashrc
+pip install conan
+conan profile detect
+```
+
+Check that the generated `~/.conan2/profiles/default` names `compiler.version=14`
+and `compiler.cppstd=gnu23`. That combination matches no prebuilt binary in
+ConanCenter, so every dependency is compiled from source on this box — which is what
+makes the two items below matter.
+
+OpenSSL's build is driven by perl scripts, and Amazon Linux ships perl split into
+per-module packages, so a minimal instance is missing several of them. `./Configure`
+needs `FindBin`, and the FIPS provider's `mk-fipsmodule-cnf.pl` needs `Digest::SHA`;
+they fail one at a time, each costing another build attempt:
+
+```bash
+sudo dnf install -y perl-FindBin perl-IPC-Cmd perl-Data-Dumper perl-File-Compare perl-File-Copy
+sudo dnf install -y perl-core
+```
+
+`perl-core` pulls the full distribution and supersedes the explicit list — installing
+it alone is enough, and it also covers whatever the *next* dependency's build scripts
+reach for.
+
+Useful on a headless box, since a dependency build is long enough to want to detach
+from and watch:
+
+```bash
+sudo dnf install htop
+sudo dnf install tmux
+```
+
+**Memory.** Building the dependencies needs more RAM than running the binaries does.
+Boost's `read_graphviz_new.cpp` alone wants well over a gigabyte in a Debug/C++23
+build, and conan hands b2 one job per core, so on a 2 GB instance the compiler is
+killed by the OOM killer — which surfaces as `g++-14: fatal error: Killed signal
+terminated program cc1plus`, not as an out-of-memory message. Confirm with
+`dmesg | grep -i "killed process"`. Any of these fixes it: build the dependencies in
+Release even when building this project in Debug
+(`-s "boost/*:build_type=Release"`), serialise the build
+(`-c tools.build:jobs=1`), or add swap. The last is the most reliable:
+
+```bash
+sudo fallocate -l 8G /swapfile && sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
+```
+
+All of this is a one-time cost per machine. Once one build has succeeded, preserve
+`~/.conan2` — bake it into an AMI, or push the packages to a conan remote — and the
+instance only ever compiles OmniTrader itself afterwards.
+
 ## Configuration
 
 Credentials and launch configuration are kept in separate trees: `account/` holds
