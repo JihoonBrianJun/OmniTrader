@@ -37,6 +37,7 @@ class BinanceListener : public IExchangeListener {
         void start() override;
         void stop() override;
         void publish_product_info() override;
+        void publish_user_state() override;
 
     private:
         enum class Socket { Market, User };

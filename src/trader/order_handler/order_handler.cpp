@@ -540,11 +540,14 @@ void OrderHandler::on_order_response(const Omni::OrderGateway::OrderResponse& re
         // Recorded before the forget below, which is what still holds the price, qty
         // and side of the order being pulled.
         log_order_record(product, response.cid, response.order_no, "cancel", response.success);
-        // Cancel ack: drop the order on success; on failure leave it (still open).
-        if (response.success) forget_order(state, response.cid);
+        // Cancel ack: drop the order on success. On failure keep it -- it is still
+        // working -- unless the venue's answer was that there is no such order, in
+        // which case it is gone (filled, expired, already cancelled) and keeping it
+        // would mean re-cancelling it on every decision for the rest of the session.
+        if (response.success || response.order_gone) forget_order(state, response.cid);
         LOG_INFO(
-            logger_, "[Order Cancel] {} cid={} success={} msg={}",
-            product, response.cid, response.success, response.msg
+            logger_, "[Order Cancel] {} cid={} success={} gone={} msg={}",
+            product, response.cid, response.success, response.order_gone, response.msg
         );
         return;
     }

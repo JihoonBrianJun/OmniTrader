@@ -126,14 +126,26 @@ void GeuantStrategy::make_decision(
             to_double_price(price_info.bbid_price_in_min_ticks) + local_tick_size
           );
 
-    auto bid_qty_limit_in_lots = params_.position_in_dollar
-        ? (dollar_to_qty_in_lots(params_.position_limit_in_dollar, price_info.mid_price) - position_in_lots)
-        : (params_.position_limit_in_lots - position_in_lots);
+    // Quantity already committed to the market on each side. The limit has to be
+    // measured against position *plus* working orders, not the position alone: every
+    // resting bid is a long the account may own a moment from now, and sizing each
+    // new order against the full remaining room lets N resting orders each sized to
+    // the whole limit fill for N times it. That is not a corner case -- it is what
+    // happens whenever fills are slow to be reported, and the orders pile up.
+    int32_t outstanding_bid_lots = 0, outstanding_ask_lots = 0;
+    for (const auto& [cid, outstanding_order] : outstanding_orders) {
+        if (outstanding_order.is_bid) outstanding_bid_lots += outstanding_order.qty_in_lots;
+        else outstanding_ask_lots += outstanding_order.qty_in_lots;
+    }
+
+    auto position_limit_in_lots = params_.position_in_dollar
+        ? dollar_to_qty_in_lots(params_.position_limit_in_dollar, price_info.mid_price)
+        : params_.position_limit_in_lots;
+
+    auto bid_qty_limit_in_lots = position_limit_in_lots - position_in_lots - outstanding_bid_lots;
     auto ask_qty_limit_in_lots = std::min(
         short_sell_unable_ ? position_in_lots : INT32_MAX,
-        params_.position_in_dollar
-            ? (position_in_lots + dollar_to_qty_in_lots(params_.position_limit_in_dollar, price_info.mid_price))
-            : (position_in_lots + params_.position_limit_in_lots)
+        position_in_lots + position_limit_in_lots - outstanding_ask_lots
     );
 
     auto position_limit_usage = params_.position_in_dollar

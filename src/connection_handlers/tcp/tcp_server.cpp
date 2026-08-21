@@ -358,6 +358,10 @@ void TcpServer::broadcast_worker() {
                                 cmd.session->send_message(json_buffer);
                             }
                         }
+                        // Snapshot-based state (positions, resting orders) has no
+                        // retained value here -- it is the adapter's to fetch -- so
+                        // the owner is told a subscriber arrived and republishes it.
+                        if (subscribe_hook_) subscribe_hook_(cmd.product);
                         break;
                     }
                     case SubscriptionCommand::Type::UNSUBSCRIBE_PRODUCT: {

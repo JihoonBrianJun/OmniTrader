@@ -32,6 +32,21 @@ class IExchangeListener {
         // exchange has no product info" a statement in the type system instead of an
         // empty body every adapter has to remember to write.
         virtual void publish_product_info() {}
+
+        // Enqueue this account's authoritative user state -- positions/balances and
+        // resting orders -- as normalized messages, from whatever snapshot endpoint
+        // the exchange provides.
+        //
+        // Called on every (re)connect of the user stream, and again whenever a client
+        // subscribes: the stream only reports *changes*, so a trader that connects
+        // between two changes would otherwise never learn the position it already
+        // has, and would trade as though it were flat. That was not visible while
+        // the user socket was dropping every few minutes and re-seeding as it came
+        // back; with a stable socket the seed happens once, and a late subscriber
+        // misses it for good.
+        //
+        // Default: nothing, for an exchange with no such snapshot.
+        virtual void publish_user_state() {}
 };
 
 } // namespace Omni::Listener

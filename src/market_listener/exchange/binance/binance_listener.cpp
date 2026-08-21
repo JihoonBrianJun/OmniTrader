@@ -270,8 +270,15 @@ void BinanceListener::on_market_open() {
 
 
 void BinanceListener::on_user_open() {
+    publish_user_state();
+}
+
+
+void BinanceListener::publish_user_state() {
     // ACCOUNT_UPDATE/ORDER_TRADE_UPDATE only fire on change, so seed authoritative
-    // state from REST snapshots on every (re)connect, per configured category.
+    // state from REST snapshots on every (re)connect -- and on every new
+    // subscription, since a trader that connects between two changes has nothing
+    // else to learn its open position from. Per configured category.
     if (!futures_products_.empty()) {
         for (auto& msg : rest_client_->fetch_positions()) {   // positionRisk
             event_queue_->enqueue(std::move(msg));

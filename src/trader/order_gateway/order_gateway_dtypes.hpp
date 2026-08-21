@@ -49,6 +49,16 @@ struct OrderResponse {
     std::string msg = "";
     std::string order_no = "";
     uint64_t cid = 0;        // echoes the request's cid for correlation
+    // The venue rejected this request because the order is not there any more --
+    // already filled, already cancelled, expired. Set by the gateway, which is the
+    // only place that knows what its exchange's codes mean.
+    //
+    // It matters because the trader's default reading of a failed cancel is "the
+    // order is still working, keep it": correct for a transport failure, and exactly
+    // wrong here. Without this distinction a filled order stays in the outstanding
+    // set for good and is re-cancelled on every decision, which is what turned a
+    // silent user-data feed into tens of thousands of rejected cancels.
+    bool order_gone = false;
 };
 
 } // namespace Omni::OrderGateway

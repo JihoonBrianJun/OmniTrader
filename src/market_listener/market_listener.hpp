@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <map>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -50,6 +51,13 @@ class MarketListener {
 
         std::map<std::string, std::shared_ptr<Logger::CsvLogger<OrderbookCsvSchema>>> orderbook_loggers_;
         std::map<std::string, std::shared_ptr<Logger::CsvLogger<TradeCsvSchema>>> trade_loggers_;
+
+        // Rate-limits the snapshot republished when a client subscribes; see the
+        // definition. Guarded because the subscribe hook runs on the TCP server's
+        // broadcast worker, not this object's own thread.
+        std::mutex user_state_mutex_;
+        long last_user_state_publish_ms_ = 0;
+        bool should_publish_user_state();
 
         void start_tcp_server();
         void start_product_info_refresh();

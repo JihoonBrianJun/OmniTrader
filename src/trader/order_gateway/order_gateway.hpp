@@ -8,23 +8,22 @@
 namespace Omni::OrderGateway {
 
 // Order placement abstraction. KIS implements it over REST; Binance implements it
-// over the WS API with a REST fallback. The trader only sees this interface.
+// over the WS API only. The trader only sees this interface.
 //
 // Asynchronous by contract: place/amend/cancel only *dispatch* the request and
 // return true if it was accepted. The actual OrderResponse (carrying the request's
 // cid) is delivered later through the response sink the owner installs. The Binance
-// WS gateway delivers from its socket's on_message; the REST gateways (Binance
-// fallback, KIS) queue their blocking HTTP call on a worker thread of their own and
-// deliver from there, so no implementation ties up the caller for a round trip. A
-// false return means the request could not be accepted at all (socket down, backlog
-// full) -- the caller may fall back to another transport, and the gateway also
-// delivers a failed response so the owner's bookkeeping does not wait on a reply that
-// is not coming.
+// WS gateway delivers from its socket's on_message; the KIS REST gateway queues its
+// blocking HTTP call on a worker thread of its own and delivers from there, so no
+// implementation ties up the caller for a round trip. A false return means the
+// request could not be accepted at all (socket down, backlog full), and the gateway
+// delivers a failed response with it, so the owner's bookkeeping does not wait on a
+// reply that is not coming.
 //
 // Ordered: a gateway sends requests to the venue in the order it received them. The
 // trader relies on this -- it issues a cancel and the place that replaces it back to
 // back, and a place that overtook its cancel would rest at both prices at once. The
-// WS gateway gets this from writing to one socket; the REST gateways get it from
+// WS gateway gets this from writing to one socket; the KIS REST gateway gets it from
 // running one worker rather than a thread per request.
 //
 // The sink may still fire on any thread, and replies are not ordered against each

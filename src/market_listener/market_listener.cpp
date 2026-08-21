@@ -77,6 +77,25 @@ MarketListener::~MarketListener() {
 
 
 void MarketListener::start_tcp_server() {
+    // A subscriber that joins mid-session has to be told the account state that is
+    // snapshot-based rather than streamed -- its open position above all. The hook
+    // fires on the broadcast worker, which must not block, so the adapter's REST
+    // fetch is posted onto the product-info context: the one thread already set
+    // aside for the adapter's blocking calls.
+    tcp_server_->set_subscribe_hook([this](const std::string& product) {
+        if (!should_publish_user_state()) return;
+        boost::asio::post(*product_info_io_context_, [this, product]() {
+            if (!adapter_) return;
+            try {
+                adapter_->publish_user_state();
+            } catch (const std::exception& e) {
+                LOG_WARNING(
+                    logger_, "User-state publish for new subscriber of {} failed: {}",
+                    product, e.what()
+                );
+            }
+        });
+    });
     tcp_server_->start();
     tcp_context_thread_ = std::thread([this]() {
         try {
@@ -85,6 +104,25 @@ void MarketListener::start_tcp_server() {
             LOG_WARNING(logger_, "Exception within TCP server thread: {}", e.what());
         }
     });
+}
+
+
+bool MarketListener::should_publish_user_state() {
+    // One snapshot covers every product and every subscriber, so one trader
+    // subscribing to several products at startup must not turn into a REST call per
+    // product. Deliberately short: it is there to coalesce that burst (which arrives
+    // within milliseconds), not to throttle. A longer window would risk suppressing
+    // the fetch a second trader needs, and a trader that starts up without its
+    // position is the failure this whole path exists to prevent.
+    constexpr long MIN_USER_STATE_INTERVAL_MS = 500;
+    std::lock_guard<std::mutex> lock(user_state_mutex_);
+    auto now_ms = get_curr_tstamp_ms();
+    if (last_user_state_publish_ms_ != 0 &&
+        now_ms - last_user_state_publish_ms_ < MIN_USER_STATE_INTERVAL_MS) {
+        return false;
+    }
+    last_user_state_publish_ms_ = now_ms;
+    return true;
 }
 
 

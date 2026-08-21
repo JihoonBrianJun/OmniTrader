@@ -165,14 +165,24 @@ class BaseWebsocketClient : public websocketpp::client<Config> {
                 notify_websocket_status();
             });
 
-            this->set_message_handler([this](
-                websocketpp::connection_hdl hdl, message_ptr msg
+            // Pongs arrive here and nowhere else. websocketpp routes control frames
+            // (ping/pong/close) to process_control_frame, which dispatches a pong to
+            // the pong handler; the message handler is reached only for data frames
+            // (it is guarded by !is_control(opcode)). Clearing awaiting_pong_ from
+            // the message handler therefore never fires, which left the flag stuck
+            // true and made send_periodic_ping declare every socket dead one ping
+            // interval after it opened.
+            this->set_pong_handler([this](
+                websocketpp::connection_hdl, std::string
             ) {
                 if (destroying_.load()) return;
-                if (msg->get_opcode() == websocketpp::frame::opcode::pong) {
-                    awaiting_pong_ = false;
-                    return;
-                }
+                awaiting_pong_.store(false);
+            });
+
+            this->set_message_handler([this](
+                websocketpp::connection_hdl /*hdl*/, message_ptr msg
+            ) {
+                if (destroying_.load()) return;
                 on_stream_message(msg);
             });
         }
@@ -219,8 +229,18 @@ class BaseWebsocketClient : public websocketpp::client<Config> {
                     return;
                 } else if (!ec) {
                     if (awaiting_pong_.load()) {
-                        LOG_WARNING(logger_, "Pong not received in time");
+                        LOG_WARNING(logger_, "Pong not received in time; closing socket");
                         opened_.store(false);
+                        // Close it rather than only marking it down. The owner is
+                        // told next and will drop this client, but a socket left
+                        // half-open until then keeps a connection slot on the venue
+                        // and can still deliver frames into a dying object.
+                        try {
+                            websocketpp::lib::error_code ec;
+                            this->close(hdl, websocketpp::close::status::going_away, "pong timeout", ec);
+                        } catch (const std::exception& e) {
+                            LOG_WARNING(logger_, "Close after pong timeout failed: {}", e.what());
+                        }
                         notify_websocket_status();
                         return;
                     }

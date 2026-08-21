@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 
 #include <memory>
 #include <string>
@@ -108,6 +109,14 @@ class TcpServer {
         // broadcast_to_subscribers like any feed.
         void set_product_info(const std::string& product, const ProductInfoData& data);
 
+        // Called on the broadcast worker thread each time a session subscribes to a
+        // product. The owner uses it to publish state that is snapshot-based rather
+        // than streamed (positions, resting orders), which a subscriber joining
+        // mid-session would otherwise never see. Must not block: it runs in front of
+        // every pending broadcast. Set before start().
+        using SubscribeHook = std::function<void(const std::string& product)>;
+        void set_subscribe_hook(SubscribeHook hook) { subscribe_hook_ = std::move(hook); }
+
         void add_session(std::shared_ptr<TcpSession> session);
         void remove_session(std::shared_ptr<TcpSession> session);
         void notify_subscribe(std::shared_ptr<TcpSession> session, const std::string& product);
@@ -116,6 +125,8 @@ class TcpServer {
     private:
         void do_accept();
         void broadcast_worker();
+
+        SubscribeHook subscribe_hook_;
 
         boost::asio::io_context& io_context_;
         boost::asio::ip::tcp::acceptor acceptor_;
