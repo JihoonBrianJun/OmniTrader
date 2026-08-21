@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <cstdlib>   // std::abs for integral types (<cmath> only guarantees the floating ones)
 #include "geuant_strategy.hpp"
 
 namespace Omni::Trader {
@@ -49,17 +51,81 @@ void GeuantStrategy::choose_orders_to_cancel(
     std::map<int64_t, int32_t>& bid_place_orders,
     std::map<int64_t, int32_t>& ask_place_orders,
     std::vector<uint64_t>& bid_cancel_orders,
-    std::vector<uint64_t>& ask_cancel_orders
+    std::vector<uint64_t>& ask_cancel_orders,
+    bool is_liquidate
 ) {
+    // No buffer while liquidating. The liquidation quote is sized to the whole
+    // position, so letting a nearby resting order stand in for it would leave the
+    // position only partly quoted out -- that order carries whatever size it was
+    // placed with, not the size needed to get flat.
+    const double buffer_bp = is_liquidate ? 0.0 : params_.order_buffer_bp;
+
     for (const auto& [cid, outstanding_order] : outstanding_orders) {
         auto& place_orders = outstanding_order.is_bid ? bid_place_orders : ask_place_orders;
-        auto price_it = place_orders.find(outstanding_order.price_in_min_ticks);
+        const auto outstanding_price = outstanding_order.price_in_min_ticks;
 
-        if (price_it == place_orders.end()) {
+        // How far a wanted price may sit from this order and still count as the same
+        // quote, as a whole number of min ticks -- which is what the place map is
+        // keyed by, so the matching below is pure integer arithmetic.
+        //
+        // Computed straight from the tick count rather than by converting to a price
+        // and back: to_double_price() multiplies by min_tick_size_ and this would
+        // immediately divide by it again, and min_tick_size_ is not exactly
+        // representable in binary, so the round trip only adds rounding to undo.
+        //
+        // The epsilon is load-bearing, not decoration. Whenever the exact result
+        // lands on an integer -- which is what a hand-written buffer like 1.0 or 0.5
+        // tends to produce -- the division can land a hair below it, and a bare
+        // floor() would then quietly shrink the tolerance by a full tick.
+        //
+        // Flooring is also what makes buffer_bp = 0 exactly the original behaviour: a
+        // tolerance below one tick rounds to zero, and the range query degenerates to
+        // the single exact key.
+        int64_t tolerance_in_min_ticks = 0;
+        if (buffer_bp > 0.0) {
+            tolerance_in_min_ticks = static_cast<int64_t>(std::floor(
+                static_cast<double>(std::abs(outstanding_price)) * buffer_bp / 10000.0 + 1e-8
+            ));
+        }
+
+        // The nearest wanted price -- not merely a nearby one. With a ladder
+        // (order_num > 1) two wanted prices can both be in range, and pairing each
+        // resting order with the closest keeps the ladder's shape instead of
+        // collapsing two levels onto one.
+        //
+        // The map is sorted, so the nearest key is always one of the two bracketing
+        // this order: the first at or above it, and the one before that. Checking
+        // just those two is O(log n) and needs no scan of the range.
+        auto upper = place_orders.lower_bound(outstanding_price);
+        auto candidate = place_orders.end();
+        int64_t best_distance = 0;
+
+        // Below first, so an exact tie between the two neighbours resolves to the
+        // lower price -- the side a resting bid would rather keep.
+        if (upper != place_orders.begin()) {
+            candidate = std::prev(upper);
+            best_distance = outstanding_price - candidate->first;   // > 0 by ordering
+        }
+        if (upper != place_orders.end()) {
+            auto distance = upper->first - outstanding_price;       // >= 0 by ordering
+            if (candidate == place_orders.end() || distance < best_distance) {
+                candidate = upper;
+                best_distance = distance;
+            }
+        }
+        // Near, but near enough?
+        if (candidate != place_orders.end() && best_distance > tolerance_in_min_ticks) {
+            candidate = place_orders.end();
+        }
+
+        if (candidate == place_orders.end()) {
             auto& cancel_orders = outstanding_order.is_bid ? bid_cancel_orders : ask_cancel_orders;
             cancel_orders.emplace_back(cid);
         } else {
-            place_orders.erase(price_it);
+            // Close enough: the resting order stands in for this quote, so drop the
+            // wanted price rather than sending a second order at nearly the same
+            // level. Each wanted price is claimed by at most one resting order.
+            place_orders.erase(candidate);
         }
     }
 }
@@ -106,7 +172,8 @@ void GeuantStrategy::make_decision(
         }
 
         choose_orders_to_cancel(
-            outstanding_orders, bid_place_orders, ask_place_orders, bid_cancel_orders, ask_cancel_orders
+            outstanding_orders, bid_place_orders, ask_place_orders,
+            bid_cancel_orders, ask_cancel_orders, do_liquidate
         );
         return;
     }
@@ -187,7 +254,8 @@ void GeuantStrategy::make_decision(
     }
 
     choose_orders_to_cancel(
-        outstanding_orders, bid_place_orders, ask_place_orders, bid_cancel_orders, ask_cancel_orders
+        outstanding_orders, bid_place_orders, ask_place_orders,
+        bid_cancel_orders, ask_cancel_orders, do_liquidate
     );
 }
 

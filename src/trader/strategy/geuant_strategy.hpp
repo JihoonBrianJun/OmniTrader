@@ -20,6 +20,11 @@ struct GeuantParams {
     bool position_in_dollar = false;
     double position_limit_in_dollar = 0.0;
 
+    // Order refresh. How far the price the strategy now wants may sit from an order
+    // it already has resting before it bothers replacing it. 0 keeps the original
+    // behaviour: replace unless the price matches to the tick.
+    double order_buffer_bp = 0.0;
+
     // Multi order configs
     size_t order_num = 0;
     double order_interval_bp = 0.0;
@@ -40,6 +45,7 @@ struct GeuantParams {
         program.add_argument("--position_in_dollar").flag();
         program.add_argument("--position_limit_in_dollar").scan<'g', double>().default_value(0.0);
 
+        program.add_argument("--order_buffer_bp").scan<'g', double>().default_value(0.0);
         program.add_argument("--order_num").scan<'i', size_t>().default_value(size_t{0});
         program.add_argument("--order_interval_bp").scan<'g', double>().default_value(0.0);
         program.add_argument("--tick_based_order_interval").flag();
@@ -60,6 +66,7 @@ struct GeuantParams {
         position_in_dollar = program.get<bool>("--position_in_dollar");
         position_limit_in_dollar = program.get<double>("--position_limit_in_dollar");
 
+        order_buffer_bp = program.get<double>("--order_buffer_bp");
         order_num = program.get<size_t>("--order_num");
         order_interval_bp = program.get<double>("--order_interval_bp");
         tick_based_order_interval = program.get<bool>("--tick_based_order_interval");
@@ -84,6 +91,7 @@ struct GeuantParams {
         s.get("position_in_dollar", position_in_dollar);
         s.get("position_limit_in_dollar", position_limit_in_dollar);
 
+        s.get("order_buffer_bp", order_buffer_bp);
         s.get("order_num", order_num);
         s.get("order_interval_bp", order_interval_bp);
         s.get("tick_based_order_interval", tick_based_order_interval);
@@ -116,12 +124,19 @@ private:
 
     int32_t get_order_qty_in_lots(int64_t price_in_min_ticks, int32_t qty_limit_in_lots);
 
+    // Pair up what is already resting with what the strategy now wants. An
+    // outstanding order that has a wanted price within order_buffer_bp of its own
+    // keeps its place, and that wanted price is dropped from the place map so no
+    // second order is sent for it; everything else outstanding is cancelled.
+    //
+    // Liquidating turns the buffer off -- see the body for why.
     void choose_orders_to_cancel(
         const std::map<uint64_t, OutstandingOrder>& outstanding_orders,
         std::map<int64_t, int32_t>& bid_place_orders,
         std::map<int64_t, int32_t>& ask_place_orders,
         std::vector<uint64_t>& bid_cancel_orders,
-        std::vector<uint64_t>& ask_cancel_orders
+        std::vector<uint64_t>& ask_cancel_orders,
+        bool is_liquidate
     );
 };
 
