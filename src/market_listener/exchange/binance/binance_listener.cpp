@@ -455,6 +455,7 @@ void BinanceListener::handle_market_payload(const std::string& payload) {
             msg.product = t.s;
             msg.orderbook_data.bid_book.push_back({sd(t.b), sd(t.B)});
             msg.orderbook_data.ask_book.push_back({sd(t.a), sd(t.A)});
+            if (t.E > 0) msg.orderbook_data.server_tstamp_ms = t.E;
             event_queue_->enqueue(std::move(msg));
         } else if (event_type == "depthUpdate") {
             DepthUpdateEnvelope env;
@@ -479,6 +480,7 @@ void BinanceListener::handle_market_payload(const std::string& payload) {
             Omni::OrderbookMsg msg;
             msg.product = d.s;
             msg.orderbook_data = book_it->second.to_data(config_.orderbook_levels);
+            if (d.E > 0) msg.orderbook_data.server_tstamp_ms = d.E;
             event_queue_->enqueue(std::move(msg));
         } else if (event_type == "aggTrade") {
             AggTradeEnvelope env;
@@ -487,6 +489,7 @@ void BinanceListener::handle_market_payload(const std::string& payload) {
             msg.product = env.data.s;
             msg.trade_data.trade_price = sd(env.data.p);
             msg.trade_data.cum_trade_qty = sd(env.data.q);
+            if (env.data.E > 0) msg.trade_data.server_tstamp_ms = env.data.E;
             event_queue_->enqueue(std::move(msg));
         }
     } catch (const std::exception& e) {

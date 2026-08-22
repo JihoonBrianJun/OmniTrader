@@ -131,14 +131,18 @@ struct ListenerConfig {
     }
 };
 
+// `server_tstamp` is the venue's epoch-ms stamp for the update, nan where the
+// exchange sends none (KIS) or the row came from a REST resync rather than the
+// stream. The gap against local_tstamp is the feed latency for that update.
 struct OrderbookCsvSchema {
-    static constexpr char const* header = "local_tstamp,is_bid,price,qty";
-    static constexpr char const* format = "{},{},{},{}";
+    static constexpr char const* header = "local_tstamp,server_tstamp,is_bid,price,qty";
+    static constexpr char const* format = "{},{},{},{},{}";
 };
 
 struct TradeCsvSchema {
-    static constexpr char const* header = "local_tstamp,trade_price,cum_trade_qty,cum_buy_trade_qty";
-    static constexpr char const* format = "{},{},{},{}";
+    static constexpr char const* header =
+        "local_tstamp,server_tstamp,trade_price,cum_trade_qty,cum_buy_trade_qty";
+    static constexpr char const* format = "{},{},{},{},{}";
 };
 
 } // namespace Omni::Listener

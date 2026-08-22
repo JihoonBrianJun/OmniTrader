@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace Omni::OrderGateway {
@@ -49,7 +50,13 @@ struct OrderResponse {
     std::string msg = "";
     std::string order_no = "";
     uint64_t cid = 0;        // echoes the request's cid for correlation
-    uint64_t server_tstamp_ms = 0;
+    // The venue's own timestamp for this reply, in exchange epoch milliseconds.
+    // Empty when there is none: an error reply, a request that never left the
+    // process, or an exchange that does not send one (KIS). Optional rather than 0,
+    // because 0 is a real instant and would read as one -- "the venue gave no time"
+    // has to stay distinguishable from any time it could have given. Reaches the
+    // record as nan.
+    std::optional<int64_t> server_tstamp_ms = std::nullopt;
     // The venue rejected this request because the order is not there any more --
     // already filled, already cancelled, expired. Set by the gateway, which is the
     // only place that knows what its exchange's codes mean.

@@ -57,9 +57,15 @@ struct OrderbookLevel {
     std::optional<double> price = std::nullopt;
     std::optional<double> qty = std::nullopt;
 };
+// `server_tstamp_ms` is the venue's own timestamp for the update, in epoch
+// milliseconds. Left empty -- and recorded as nan -- by any exchange that does not
+// send one (KIS among them), and by an orderbook rebuilt from a REST snapshot,
+// which carries no stream event time. Empty means "the venue told us nothing",
+// never "zero", which is why it is an optional rather than a sentinel.
 struct OrderbookData {
     std::vector<OrderbookLevel> bid_book = {};
     std::vector<OrderbookLevel> ask_book = {};
+    std::optional<int64_t> server_tstamp_ms = std::nullopt;
 };
 struct OrderbookMsg {
     std::string feed = "orderbook";
@@ -71,6 +77,7 @@ struct TradeData {
     std::optional<double> trade_price = std::nullopt;
     std::optional<double> cum_trade_qty = std::nullopt;
     std::optional<double> cum_buy_trade_qty = std::nullopt;
+    std::optional<int64_t> server_tstamp_ms = std::nullopt;   // see OrderbookData
 };
 struct TradeMsg {
     std::string feed = "trade";

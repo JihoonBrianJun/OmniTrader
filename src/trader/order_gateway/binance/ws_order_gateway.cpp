@@ -142,7 +142,7 @@ void WsOrderGateway::on_message(const std::string& payload) {
             // Only an accepted request gets a venue timestamp; an error reply carries
             // none, and 0 is how the record says so.
             if (ok.result.updateTime > 0) {
-                response.server_tstamp_ms = static_cast<uint64_t>(ok.result.updateTime);
+                response.server_tstamp_ms = static_cast<int64_t>(ok.result.updateTime);
             }
         }
     } else {

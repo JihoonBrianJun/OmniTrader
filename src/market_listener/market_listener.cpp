@@ -220,11 +220,22 @@ Logger::CsvLogger<TradeCsvSchema>* MarketListener::get_trade_logger(
 void MarketListener::log_orderbook_data(const OrderbookMsg& msg) {
     auto* csv = get_orderbook_logger(msg.product);
     auto local_tstamp = get_curr_tstamp_ns();
+    // One update, one venue timestamp: repeated on every level's row the same way
+    // local_tstamp is, so a row stands on its own without needing its siblings.
+    // nan where the exchange sends no time of its own.
+    auto server_tstamp = msg.orderbook_data.server_tstamp_ms
+        ? static_cast<double>(*msg.orderbook_data.server_tstamp_ms) : NAN;
     for (const auto& bid_level : msg.orderbook_data.bid_book) {
-        csv->write_log(local_tstamp, true, bid_level.price.value_or(NAN), bid_level.qty.value_or(NAN));
+        csv->write_log(
+            local_tstamp, server_tstamp, true,
+            bid_level.price.value_or(NAN), bid_level.qty.value_or(NAN)
+        );
     }
     for (const auto& ask_level : msg.orderbook_data.ask_book) {
-        csv->write_log(local_tstamp, false, ask_level.price.value_or(NAN), ask_level.qty.value_or(NAN));
+        csv->write_log(
+            local_tstamp, server_tstamp, false,
+            ask_level.price.value_or(NAN), ask_level.qty.value_or(NAN)
+        );
     }
 }
 
@@ -234,6 +245,8 @@ void MarketListener::log_trade_data(const TradeMsg& msg) {
     auto local_tstamp = get_curr_tstamp_ns();
     csv->write_log(
         local_tstamp,
+        msg.trade_data.server_tstamp_ms
+            ? static_cast<double>(*msg.trade_data.server_tstamp_ms) : NAN,
         msg.trade_data.trade_price.value_or(NAN),
         msg.trade_data.cum_trade_qty.value_or(NAN),
         msg.trade_data.cum_buy_trade_qty.value_or(NAN)

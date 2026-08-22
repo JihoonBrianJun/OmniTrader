@@ -221,7 +221,8 @@ private:
     void log_order_record(
         const std::string& product, uint64_t cid, const std::string& order_no,
         const char* type, bool success,
-        uint64_t server_tstamp_ms = 0, const std::string& msg = ""
+        std::optional<int64_t> server_tstamp_ms = std::nullopt,
+        const std::string& msg = ""
     );
     void log_order_decision(
         const std::string& product, const PriceInfo& price_info, const ProductState& state,

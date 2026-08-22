@@ -469,7 +469,7 @@ void OrderHandler::mark_pending_record(
 void OrderHandler::log_order_record(
     const std::string& product, uint64_t cid, const std::string& order_no,
     const char* type, bool success,
-    uint64_t server_tstamp_ms, const std::string& msg
+    std::optional<int64_t> server_tstamp_ms, const std::string& msg
 ) {
     // Popped unconditionally, so the map stays bounded by what is actually in flight
     // whether or not the record is being written.
@@ -485,7 +485,9 @@ void OrderHandler::log_order_record(
     auto* csv = get_order_record_logger(product);
     if (!csv) return;
     csv->write_log(
-        get_curr_tstamp_ns(), server_tstamp_ms, product, cid,
+        get_curr_tstamp_ns(),
+        server_tstamp_ms ? static_cast<double>(*server_tstamp_ms) : NAN,
+        product, cid,
         order_no.empty() ? "-" : order_no.c_str(),
         have_pending ? record.type : type,
         // Only knowable from the request; a reply on its own does not say which side.
@@ -809,7 +811,7 @@ void OrderHandler::update_orders(const std::string& product, bool do_liquidate) 
                         type, false,
                         // No reply, so no venue stamp and no venue message; say which
                         // of the two kinds of failure this row is.
-                        0, "no response within order_response_timeout"
+                        std::nullopt, "no response within order_response_timeout"
                     );
                 }
             };

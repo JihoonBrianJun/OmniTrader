@@ -29,6 +29,7 @@ struct MarketEventClassifier {
 
 // bookTicker: {"data":{"e":"bookTicker","s":"..","b":"..","B":"..","a":"..","A":".."}}
 struct BookTicker {
+    long E = 0;           // event time (venue epoch ms)
     std::string s = "";   // symbol
     std::string b = "";   // best bid price
     std::string B = "";   // best bid qty
@@ -41,6 +42,7 @@ struct BookTickerEnvelope {
 
 // depthUpdate: {"data":{"e":"depthUpdate","s":"..","U":..,"u":..,"pu":..,"b":[["p","q"]..],"a":[..]}}
 struct DepthUpdate {
+    long E = 0;           // event time (venue epoch ms)
     std::string s = "";
     long U = 0;
     long u = 0;
@@ -54,6 +56,7 @@ struct DepthUpdateEnvelope {
 
 // aggTrade: {"data":{"e":"aggTrade","s":"..","p":"..","q":".."}}
 struct AggTrade {
+    long E = 0;           // event time (venue epoch ms)
     std::string s = "";
     std::string p = "";   // trade price
     std::string q = "";   // trade qty
