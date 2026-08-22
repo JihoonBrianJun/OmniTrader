@@ -34,8 +34,8 @@ struct ListenerConfig {
     std::vector<std::string> products = {"BTCUSDT"};   // bare symbols (all categories)
     std::vector<ProductSpec> product_specs = {{"BTCUSDT", Category::futures}};
     std::string products_db_base_path = "products";
-    std::string orderbook_save_path = "orderbook_record";
-    std::string trade_save_path = "trade_record";
+    std::string orderbook_save_path = "logs/orderbook_record";
+    std::string trade_save_path = "logs/trade_record";
     std::string broadcast_host_address = "0.0.0.0";
     unsigned short broadcast_port = 8888;
     std::string domain_type = "real";    // selects real vs test endpoints
@@ -45,7 +45,7 @@ struct ListenerConfig {
     // Loop-control / logging (not consumed by the adapters but owned here so the
     // whole listener configuration is registered and populated in one place).
     long market_end_intraday_minute = -1;
-    std::string log_path = "logs/listener.log";
+    std::string log_path = "logs/listener/listener.log";
 
     static void set_parser(argparse::ArgumentParser& program) {
         program.add_argument("--exchange").default_value(std::string("binance"));
@@ -58,14 +58,14 @@ struct ListenerConfig {
             .nargs(argparse::nargs_pattern::any)
             .default_value(std::vector<std::string>{"BTCUSDT:futures"});   // SYMBOL[:category]
         program.add_argument("--products_db_base_path").default_value(std::string("products"));
-        program.add_argument("--orderbook_save_path").default_value(std::string("orderbook_record"));
-        program.add_argument("--trade_save_path").default_value(std::string("trade_record"));
+        program.add_argument("--orderbook_save_path").default_value(std::string("logs/orderbook_record"));
+        program.add_argument("--trade_save_path").default_value(std::string("logs/trade_record"));
         program.add_argument("--orderbook_levels").scan<'i', int>().default_value(20);
         program.add_argument("--product_info_refresh_sec").scan<'i', int64_t>().default_value(int64_t{300});
         program.add_argument("--broadcast_host_address").default_value(std::string("0.0.0.0"));
         program.add_argument("--broadcast_port").scan<'i', int>().default_value(8888);
         program.add_argument("--domain_type").default_value(std::string("real"));
-        program.add_argument("--log_path").default_value(std::string("logs/listener.log"));
+        program.add_argument("--log_path").default_value(std::string("logs/listener/listener.log"));
     }
 
     void init(const argparse::ArgumentParser& program) {

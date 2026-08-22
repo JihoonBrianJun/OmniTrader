@@ -49,7 +49,7 @@ struct PricerConfig {
     // Loop-control / logging.
     long timezone_minute_offset = 0;
     long market_end_intraday_minute = -1;
-    std::string log_path = "logs/pricer.log";
+    std::string log_path = "logs/pricer/pricer.log";
 
     static void set_parser(argparse::ArgumentParser& program) {
         program.add_argument("--fair_price_mode")
@@ -67,7 +67,7 @@ struct PricerConfig {
         program.add_argument("--timezone_minute_offset").scan<'i', int64_t>().default_value(int64_t{0});
         program.add_argument("--market_end_intraday_minute")
             .scan<'i', int64_t>().default_value(int64_t{-1});
-        program.add_argument("--log_path").default_value(std::string("logs/pricer.log"));
+        program.add_argument("--log_path").default_value(std::string("logs/pricer/pricer.log"));
     }
 
     void init(const argparse::ArgumentParser& program) {

@@ -89,14 +89,19 @@ struct TraderConfig {
     // The trader's own csv trails, written in the same layout the listener uses for
     // its orderbook/trade records: <save_path>/<exchange>/<product>/<date>.log.
     // An empty path turns that record off.
-    std::string order_record_save_path = "order_record";
-    std::string order_decision_save_path = "order_decision";
+    //
+    // Everything this process writes lives under logs/, one subdirectory per kind:
+    // logs/{trader,listener,pricer} for the process logs and
+    // logs/{order_record,order_decision,orderbook_record,trade_record} for the csv
+    // trails. One directory to size a volume against, cap, or ship off the box.
+    std::string order_record_save_path = "logs/order_record";
+    std::string order_decision_save_path = "logs/order_decision";
 
     // Loop-control / logging.
     long timezone_minute_offset = 0;
     long market_end_intraday_minute = -1;
     std::string log_base_path = "./log";
-    std::string log_path = "logs/trader.log";
+    std::string log_path = "logs/trader/trader.log";
 
     // Minimal first-pass parser to learn exchange/strategy before the
     // strategy-specific args are registered (two-phase parse).
@@ -132,12 +137,12 @@ struct TraderConfig {
             .scan<'i', int64_t>().default_value(int64_t{5000});
         program.add_argument("--no_shutdown_market_flatten").flag();
         program.add_argument("--no_shutdown_reduce_only").flag();
-        program.add_argument("--order_record_save_path").default_value(std::string("order_record"));
-        program.add_argument("--order_decision_save_path").default_value(std::string("order_decision"));
+        program.add_argument("--order_record_save_path").default_value(std::string("logs/order_record"));
+        program.add_argument("--order_decision_save_path").default_value(std::string("logs/order_decision"));
         program.add_argument("--timezone_minute_offset").scan<'i', int64_t>().default_value(int64_t{0});
         program.add_argument("--market_end_intraday_minute").scan<'i', int64_t>().default_value(int64_t{-1});
         program.add_argument("--log_base_path").default_value(std::string("./log"));
-        program.add_argument("--log_path").default_value(std::string("logs/trader.log"));
+        program.add_argument("--log_path").default_value(std::string("logs/trader/trader.log"));
     }
 
     void init(const argparse::ArgumentParser& program) {

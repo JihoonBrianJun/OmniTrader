@@ -11,10 +11,10 @@
     "broadcast_host_address": "0.0.0.0",
     "broadcast_port": 8888,
     "products_db_base_path": "products",
-    "orderbook_save_path": "orderbook_record",
-    "trade_save_path": "trade_record",
+    "orderbook_save_path": "logs/orderbook_record",
+    "trade_save_path": "logs/trade_record",
     "timezone_minute_offset": 540,
     "market_end_intraday_minute": -1,
-    "log_path": "logs/listener.log"
+    "log_path": "logs/listener/listener.log"
   }
 }
