@@ -39,10 +39,13 @@ BinanceListener::BinanceListener(
     event_queue_(event_queue),
     domain_type_(config.domain_type),
     market_opened_(false),
+    trade_opened_(false),
     user_opened_(false),
     market_reconnect_cnt_(0),
+    trade_reconnect_cnt_(0),
     user_reconnect_cnt_(0),
     market_reconnect_pending_(false),
+    trade_reconnect_pending_(false),
     user_reconnect_pending_(false),
     io_context_(std::make_unique<boost::asio::io_context>()),
     running_(false)
@@ -77,14 +80,31 @@ BinanceListener::~BinanceListener() {
 }
 
 
+// Book data lives on /public. The endpoint prefix is not cosmetic: a connection
+// dialled without one receives /public channels only, and everything on /market and
+// /private is silently withheld -- the socket opens, answers pings, and delivers
+// nothing. Binance decommissioned the unprefixed URLs on 2026-04-23.
 std::string BinanceListener::market_stream_url() const {
     std::string streams;
     for (const auto& product : futures_products_) {
         auto s = to_lower(product);
         if (!streams.empty()) streams += "/";
-        streams += fmt::format("{}@bookTicker/{}@depth@100ms/{}@aggTrade", s, s, s);
+        streams += fmt::format("{}@bookTicker/{}@depth@100ms", s, s);
     }
-    return fmt::format("{}/stream?streams={}", stream_domain_, streams);
+    return fmt::format("{}/public/stream?streams={}", stream_domain_, streams);
+}
+
+
+// aggTrade is classed as regular market data, so it sits on /market and needs its
+// own connection -- it cannot ride along with the book streams above.
+std::string BinanceListener::trade_stream_url() const {
+    std::string streams;
+    for (const auto& product : futures_products_) {
+        auto s = to_lower(product);
+        if (!streams.empty()) streams += "/";
+        streams += fmt::format("{}@aggTrade", s);
+    }
+    return fmt::format("{}/market/stream?streams={}", stream_domain_, streams);
 }
 
 
@@ -97,6 +117,19 @@ void BinanceListener::create_market_client() {
     };
     market_client_ = std::make_unique<OB::BinanceWebsocketClient>(
         market_stream_url(), logger_, status_cb, message_cb
+    );
+}
+
+
+void BinanceListener::create_trade_client() {
+    auto status_cb = [this](bool connecting, bool opened) {
+        ws_event_queue_.enqueue(WsStatus{Socket::Trade, connecting, opened});
+    };
+    auto message_cb = [this](const std::string& payload) {
+        ws_event_queue_.enqueue(WsPayload{Socket::Trade, payload});
+    };
+    trade_client_ = std::make_unique<OB::BinanceWebsocketClient>(
+        trade_stream_url(), logger_, status_cb, message_cb
     );
 }
 
@@ -120,8 +153,16 @@ void BinanceListener::create_user_client() {
     auto message_cb = [this](const std::string& payload) {
         ws_event_queue_.enqueue(WsPayload{Socket::User, payload});
     };
+    // /private, with the listenKey as a query parameter and the wanted events named
+    // explicitly. The old form -- {domain}/ws/{listenKey} -- still completes its
+    // handshake and still answers pings, but Binance pushes nothing down it, so the
+    // trader ran for a full session against a position it was never told about.
     user_client_ = std::make_unique<OB::BinanceWebsocketClient>(
-        fmt::format("{}/ws/{}", stream_domain_, listen_key_), logger_, status_cb, message_cb
+        fmt::format(
+            "{}/private/ws?listenKey={}&events=ORDER_TRADE_UPDATE/ACCOUNT_UPDATE",
+            stream_domain_, listen_key_
+        ),
+        logger_, status_cb, message_cb
     );
 }
 
@@ -148,6 +189,7 @@ void BinanceListener::start() {
     // behaviour matters.
     boost::asio::post(*io_context_, [this]() {
         create_market_client();
+        create_trade_client();
         if (signer_) {
             create_user_client();
             schedule_keepalive();
@@ -168,6 +210,7 @@ void BinanceListener::stop() {
     if (worker_thread_.joinable()) worker_thread_.join();
 
     market_client_.reset();
+    trade_client_.reset();
     user_client_.reset();
     if (!listen_key_.empty() && rest_client_) {
         rest_client_->close_listen_key();
@@ -193,6 +236,25 @@ void BinanceListener::schedule_market_reconnect() {
                 market_reconnect_cnt_.load()
             );
             create_market_client();
+        }
+    });
+}
+
+
+void BinanceListener::schedule_trade_reconnect() {
+    trade_client_.reset();
+    trade_reconnect_timer_ = std::make_unique<boost::asio::steady_timer>(*io_context_);
+    trade_reconnect_timer_->expires_after(std::chrono::seconds(
+        std::min(1 << std::min(trade_reconnect_cnt_.fetch_add(1), 5), 30)
+    ));
+    trade_reconnect_timer_->async_wait([this](const boost::system::error_code ec) {
+        trade_reconnect_pending_.store(false);
+        if (!ec && running_.load()) {
+            LOG_INFO(
+                logger_, "Reconnecting Binance trade socket (attempt {})",
+                trade_reconnect_cnt_.load()
+            );
+            create_trade_client();
         }
     });
 }
@@ -254,8 +316,11 @@ void BinanceListener::worker_loop() {
         std::visit(overloaded{
             [&](const WsStatus& status) { on_ws_status(status); },
             [&](const WsPayload& payload) {
-                if (payload.socket == Socket::Market) handle_market_payload(payload.payload);
-                else handle_user_payload(payload.payload);
+                // Trade rides the same parser: /market/stream and /public/stream use
+                // the identical {"stream":..,"data":..} envelope, and the inner
+                // dispatch is on data.e, which already knows aggTrade.
+                if (payload.socket == Socket::User) handle_user_payload(payload.payload);
+                else handle_market_payload(payload.payload);
             }
         }, event);
     }
@@ -263,7 +328,10 @@ void BinanceListener::worker_loop() {
 
 
 void BinanceListener::on_ws_status(const WsStatus& status) {
-    const char* name = (status.socket == Socket::Market) ? "binance_market" : "binance_user";
+    const char* name =
+        (status.socket == Socket::Market) ? "binance_market"
+        : (status.socket == Socket::Trade) ? "binance_trade"
+        : "binance_user";
 
     // A socket is redialled whenever it is down and not currently dialling -- not
     // only when it had previously been up.
@@ -288,6 +356,15 @@ void BinanceListener::on_ws_status(const WsStatus& status) {
             }
         }
         market_opened_ = status.opened;
+    } else if (status.socket == Socket::Trade) {
+        if (!trade_opened_ && status.opened) {
+            trade_reconnect_cnt_.store(0);
+        } else if (!status.opened && !status.connecting) {
+            if (!trade_reconnect_pending_.exchange(true)) {
+                boost::asio::post(*io_context_, [this]() { schedule_trade_reconnect(); });
+            }
+        }
+        trade_opened_ = status.opened;
     } else {
         if (!user_opened_ && status.opened) {
             user_reconnect_cnt_.store(0);

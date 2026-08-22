@@ -40,7 +40,16 @@ class BinanceListener : public IExchangeListener {
         void publish_user_state() override;
 
     private:
-        enum class Socket { Market, User };
+        // One socket per Binance stream endpoint. Binance split its websocket URLs
+        // into /public (high-frequency book data), /market (everything else) and
+        // /private (listenKey), and a connection only receives the channels that
+        // belong to the endpoint it dialled -- so bookTicker+depth and aggTrade
+        // cannot share one socket any more, however alike they look.
+        //
+        //   Market -> /public/stream  : @bookTicker, @depth@100ms
+        //   Trade  -> /market/stream  : @aggTrade
+        //   User   -> /private/ws     : listenKey
+        enum class Socket { Market, Trade, User };
         struct WsStatus { Socket socket; bool connecting; bool opened; };
         struct WsPayload { Socket socket; std::string payload; };
         using WsEvent = std::variant<WsStatus, WsPayload>;
@@ -59,25 +68,29 @@ class BinanceListener : public IExchangeListener {
         std::map<std::string, OB::OrderBook> order_books_;
 
         moodycamel::BlockingConcurrentQueue<WsEvent> ws_event_queue_;
-        std::unique_ptr<OB::BinanceWebsocketClient> market_client_, user_client_;
+        std::unique_ptr<OB::BinanceWebsocketClient> market_client_, trade_client_, user_client_;
         std::string listen_key_;
-        bool market_opened_, user_opened_;
+        bool market_opened_, trade_opened_, user_opened_;
         // Backoff counters and "a redial is already scheduled" flags. Atomic because
         // the status handler runs on worker_thread_ while the redial itself runs on
         // io_thread_.
-        std::atomic<int> market_reconnect_cnt_, user_reconnect_cnt_;
-        std::atomic<bool> market_reconnect_pending_, user_reconnect_pending_;
+        std::atomic<int> market_reconnect_cnt_, trade_reconnect_cnt_, user_reconnect_cnt_;
+        std::atomic<bool> market_reconnect_pending_, trade_reconnect_pending_, user_reconnect_pending_;
 
         std::unique_ptr<boost::asio::io_context> io_context_;
-        std::unique_ptr<boost::asio::steady_timer> market_reconnect_timer_, user_reconnect_timer_;
+        std::unique_ptr<boost::asio::steady_timer> market_reconnect_timer_, trade_reconnect_timer_,
+            user_reconnect_timer_;
         std::unique_ptr<boost::asio::steady_timer> keepalive_timer_;
         std::thread io_thread_, worker_thread_;
         std::atomic<bool> running_;
 
         std::string market_stream_url() const;
+        std::string trade_stream_url() const;
         void create_market_client();
+        void create_trade_client();
         void create_user_client();
         void schedule_market_reconnect();
+        void schedule_trade_reconnect();
         void schedule_user_reconnect();
         void schedule_keepalive();
 
