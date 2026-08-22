@@ -137,8 +137,13 @@ void WsOrderGateway::on_message(const std::string& payload) {
     if (classifier.status == 200) {
         response.success = true;
         WsApiSuccessResponse ok;
-        if (!glz::read<read_opts>(ok, payload) && ok.result.orderId != 0) {
-            response.order_no = std::to_string(ok.result.orderId);
+        if (!glz::read<read_opts>(ok, payload)) {
+            if (ok.result.orderId != 0) response.order_no = std::to_string(ok.result.orderId);
+            // Only an accepted request gets a venue timestamp; an error reply carries
+            // none, and 0 is how the record says so.
+            if (ok.result.updateTime > 0) {
+                response.server_tstamp_ms = static_cast<uint64_t>(ok.result.updateTime);
+            }
         }
     } else {
         response.success = false;

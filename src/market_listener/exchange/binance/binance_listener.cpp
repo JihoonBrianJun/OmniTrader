@@ -425,6 +425,8 @@ void BinanceListener::handle_user_payload(const std::string& payload) {
     };
     constexpr glz::opts read_opts{.format = glz::JSON, .error_on_unknown_keys = false};
 
+    LOG_INFO(logger_, "[UserStream] {}", payload);
+
     try {
         UserEventClassifier classifier;
         if (glz::read<classify_opts>(classifier, payload)) return;

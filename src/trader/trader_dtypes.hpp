@@ -261,10 +261,17 @@ struct TraderConfig {
 //
 // `symbol` is carried even though the file is already per product, so records for
 // several products can be concatenated without losing which is which.
+// `server_tstamp` is the venue's own epoch-ms stamp for the reply, 0 when it sent
+// none (a rejection, or a request that never left the process). Kept next to
+// local_tstamp rather than replacing it: the gap between the two is the only
+// measure of round-trip and clock skew this file can offer.
+//
+// `msg` is the venue's error text, "-" when the request succeeded. Commas and
+// newlines are stripped on the way in, since neither survives a CSV field.
 struct OrderRecordCsvSchema {
     static constexpr char const* header =
-        "local_tstamp,symbol,cid,order_no,type,side,success,price,qty";
-    static constexpr char const* format = "{},{},{},{},{},{},{},{},{}";
+        "local_tstamp,server_tstamp,symbol,cid,order_no,type,side,success,price,qty,msg";
+    static constexpr char const* format = "{},{},{},{},{},{},{},{},{},{},{}";
 };
 
 // One row per decision that reached the strategy: everything it was given, and the

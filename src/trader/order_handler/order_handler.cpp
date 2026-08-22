@@ -19,6 +19,18 @@ template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
 template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 
+// A venue error message is free text and lands in a comma-separated field, so the
+// two characters that would split a row or end it early are replaced rather than
+// escaped -- the message is for a human reading the trail, not a round trip.
+static std::string csv_safe(const std::string& text) {
+    std::string out = text;
+    std::replace(out.begin(), out.end(), ',', ';');
+    std::replace(out.begin(), out.end(), '\n', ' ');
+    std::replace(out.begin(), out.end(), '\r', ' ');
+    return out;
+}
+
+
 static std::unique_ptr<Omni::OrderGateway::IOrderGateway> create_order_gateway(
     const TraderConfig& config, quill::Logger* logger
 ) {
@@ -456,7 +468,8 @@ void OrderHandler::mark_pending_record(
 
 void OrderHandler::log_order_record(
     const std::string& product, uint64_t cid, const std::string& order_no,
-    const char* type, bool success
+    const char* type, bool success,
+    uint64_t server_tstamp_ms, const std::string& msg
 ) {
     // Popped unconditionally, so the map stays bounded by what is actually in flight
     // whether or not the record is being written.
@@ -472,14 +485,15 @@ void OrderHandler::log_order_record(
     auto* csv = get_order_record_logger(product);
     if (!csv) return;
     csv->write_log(
-        get_curr_tstamp_ns(), product, cid,
+        get_curr_tstamp_ns(), server_tstamp_ms, product, cid,
         order_no.empty() ? "-" : order_no.c_str(),
         have_pending ? record.type : type,
         // Only knowable from the request; a reply on its own does not say which side.
         have_pending ? (record.is_bid ? "bid" : "ask") : "-",
         success,
         have_pending ? record.price : NAN,
-        have_pending ? record.qty : NAN
+        have_pending ? record.qty : NAN,
+        msg.empty() ? std::string("-") : csv_safe(msg)
     );
 }
 
@@ -520,7 +534,8 @@ void OrderHandler::on_order_response(const Omni::OrderGateway::OrderResponse& re
         if (pending != pending_order_records_.end()) {
             log_order_record(
                 pending->second.product, response.cid, response.order_no,
-                pending->second.type, response.success
+                pending->second.type, response.success,
+                response.server_tstamp_ms, response.msg
             );
         }
         return;
@@ -539,7 +554,10 @@ void OrderHandler::on_order_response(const Omni::OrderGateway::OrderResponse& re
     if (was_cancel) {
         // Recorded before the forget below, which is what still holds the price, qty
         // and side of the order being pulled.
-        log_order_record(product, response.cid, response.order_no, "cancel", response.success);
+        log_order_record(
+            product, response.cid, response.order_no, "cancel", response.success,
+            response.server_tstamp_ms, response.msg
+        );
         // Cancel ack: drop the order on success. On failure keep it -- it is still
         // working -- unless the venue's answer was that there is no such order, in
         // which case it is gone (filled, expired, already cancelled) and keeping it
@@ -554,7 +572,10 @@ void OrderHandler::on_order_response(const Omni::OrderGateway::OrderResponse& re
 
     // Place ack (or a late place reply the execution feed already reconciled): bind
     // the exchange order_no on success; drop the optimistic order if the place failed.
-    log_order_record(product, response.cid, response.order_no, "place", response.success);
+    log_order_record(
+        product, response.cid, response.order_no, "place", response.success,
+        response.server_tstamp_ms, response.msg
+    );
     if (response.success) {
         if (!response.order_no.empty()) {
             state.cid_to_order_no[response.cid] = response.order_no;
@@ -785,7 +806,10 @@ void OrderHandler::update_orders(const std::string& product, bool do_liquidate) 
                     log_order_record(
                         product, cid,
                         on_it != state.cid_to_order_no.end() ? on_it->second : "",
-                        type, false
+                        type, false,
+                        // No reply, so no venue stamp and no venue message; say which
+                        // of the two kinds of failure this row is.
+                        0, "no response within order_response_timeout"
                     );
                 }
             };

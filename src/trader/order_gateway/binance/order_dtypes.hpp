@@ -34,6 +34,7 @@ struct WsApiResponseClassifier {
 
 struct WsApiResult {
     long orderId = 0;
+    long updateTime = 0;   // venue epoch ms; present on both order.place and order.cancel
 };
 struct WsApiSuccessResponse {
     WsApiResult result = {};

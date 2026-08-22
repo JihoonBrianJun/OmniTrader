@@ -49,6 +49,7 @@ struct OrderResponse {
     std::string msg = "";
     std::string order_no = "";
     uint64_t cid = 0;        // echoes the request's cid for correlation
+    uint64_t server_tstamp_ms = 0;
     // The venue rejected this request because the order is not there any more --
     // already filled, already cancelled, expired. Set by the gateway, which is the
     // only place that knows what its exchange's codes mean.
