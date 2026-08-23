@@ -375,7 +375,21 @@ void OrderHandler::on_execution(const std::string& product, const ExecutionData&
             if (have_cid) {
                 auto& order = state.outstanding_orders[cid];
                 order.qty_in_lots -= exec_qty_in_lots;
-                if (order.qty_in_lots <= 0) forget_order(state, cid);
+                if (order.qty_in_lots <= 0) {
+                    // Fully filled: the order is gone, so any request still in flight
+                    // for it can no longer be answered in a way that clears the wait --
+                    // a cancel that lost the race to the fill comes back "unknown order",
+                    // and by then forget_order has dropped the cid, so on_order_response
+                    // takes its unknown-cid path and never reaches the erase below it.
+                    // Left in the set, that cid stalls every decision for this product
+                    // until order_response_timeout, which is exactly when a fresh fill
+                    // has left us holding inventory. Partial fills are not cleared: the
+                    // order is still working and its cancel is still legitimately open.
+                    state.response_waiting.response_waiting_place_orders.erase(cid);
+                    state.response_waiting.response_waiting_cancel_orders.erase(cid);
+                    forget_order(state, cid);
+                    clear_waiting_if_idle();
+                }
             }
             if (data.update_position_on_fill) {
                 state.position_in_lots += data.is_bid ? exec_qty_in_lots : -exec_qty_in_lots;
