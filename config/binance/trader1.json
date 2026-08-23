@@ -1,0 +1,29 @@
+{
+  "trader_config": {
+    "exchange": "binance",
+    "strategy_name": "Geuant",
+    "market_type": "derivatives",
+    "domain_type": "real",
+    "trade_products": [
+        "SOXLUSDT:futures"
+    ],
+    "subscribe_products": [],
+    "broadcast_host_address": "0.0.0.0",
+    "broadcast_port": 8888,
+    "pricer_host_address": "0.0.0.0",
+    "pricer_port": 8889,
+    "fair_price_max_age_ms": 1000,
+    "order_update_interval_ms": 100,
+    "flatten_on_shutdown": true,
+    "shutdown_cancel_timeout_ms": 5000,
+    "shutdown_flatten_timeout_ms": 5000,
+    "shutdown_market_flatten": true,
+    "shutdown_reduce_only": true,
+    "order_record_save_path": "logs/order_record",
+    "order_decision_save_path": "logs/order_decision",
+    "timezone_minute_offset": 0,
+    "market_end_intraday_minute": -1,
+    "log_base_path": "./log",
+    "log_path": "logs/trader/trader.log"
+  }
+}

@@ -4,7 +4,8 @@
     "market_type": "derivatives",
     "domain_type": "real",
     "products": [
-        "BTCUSDC:futures"
+        "BTCUSDC:futures",
+        "SOXLUSDT:futures"
     ],
     "orderbook_levels": 20,
     "product_info_refresh_sec": 300,
