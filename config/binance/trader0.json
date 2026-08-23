@@ -13,7 +13,7 @@
     "pricer_host_address": "0.0.0.0",
     "pricer_port": 8889,
     "fair_price_max_age_ms": 1000,
-    "order_update_interval_ms": 1000,
+    "order_update_interval_ms": 100,
     "flatten_on_shutdown": true,
     "shutdown_cancel_timeout_ms": 5000,
     "shutdown_flatten_timeout_ms": 5000,

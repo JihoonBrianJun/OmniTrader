@@ -8,7 +8,7 @@
     "broadcast_port": 8888,
     "publish_host_address": "0.0.0.0",
     "publish_port": 8889,
-    "publish_interval_ms": 100,
+    "publish_interval_ms": 20,
     "timezone_minute_offset": 0,
     "market_end_intraday_minute": -1,
     "log_path": "logs/pricer/pricer.log"
