@@ -5,7 +5,7 @@
     "domain_type": "real",
     "products": [
         "BTCUSDC:futures",
-        "SOXLUSDT:futures"
+        "ETHUSDC:futures"
     ],
     "orderbook_levels": 20,
     "product_info_refresh_sec": 300,

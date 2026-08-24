@@ -3,7 +3,7 @@
     "fair_price_mode": "FACTOR",
     "products": [
         "BTCUSDC:futures",
-        "SOXLUSDT:futures"
+        "ETHUSDC:futures"
     ],
     "broadcast_host_address": "0.0.0.0",
     "broadcast_port": 8888,
