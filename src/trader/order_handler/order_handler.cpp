@@ -728,9 +728,9 @@ void OrderHandler::build_price_info(const ProductState& state, PriceInfo& price_
         && (fair_price_max_age_ns_ <= 0
             || (get_curr_tstamp_ns() - state.fair_price.ts) <= fair_price_max_age_ns_);
 
-    if (usable) {
-        price_info.fair_price = state.fair_price.fair_price;
+    if (usable && std::isfinite(state.fair_price.factor)) {
         price_info.applied_factor = state.fair_price.factor;
+        price_info.fair_price = price_info.applied_factor * price_info.mid_price;
     } else {
         price_info.fair_price = price_info.mid_price;
     }
