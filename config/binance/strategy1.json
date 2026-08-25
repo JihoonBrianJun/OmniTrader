@@ -11,7 +11,7 @@
     "position_limit_in_lots": 10,
     "position_in_dollar": true,
     "position_limit_in_dollar": 22500.0,
-    "order_buffer_bp": 0.5,
+    "order_buffer_bp": 0.2,
     "order_num": 1,
     "order_interval_bp": 0.0,
     "tick_based_order_interval": false,
