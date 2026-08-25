@@ -13,6 +13,8 @@
     "products_db_base_path": "products",
     "orderbook_save_path": "logs/orderbook_record",
     "trade_save_path": "logs/trade_record",
+    "no_orderbook_log": true,
+    "no_public_trade_log": true,
     "timezone_minute_offset": 540,
     "market_end_intraday_minute": -1,
     "log_path": "logs/listener/listener.log"

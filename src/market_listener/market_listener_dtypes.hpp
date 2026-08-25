@@ -36,6 +36,8 @@ struct ListenerConfig {
     std::string products_db_base_path = "products";
     std::string orderbook_save_path = "logs/orderbook_record";
     std::string trade_save_path = "logs/trade_record";
+    bool no_orderbook_log = false;
+    bool no_public_trade_log = false;
     std::string broadcast_host_address = "0.0.0.0";
     unsigned short broadcast_port = 8888;
     std::string domain_type = "real";    // selects real vs test endpoints
@@ -60,6 +62,8 @@ struct ListenerConfig {
         program.add_argument("--products_db_base_path").default_value(std::string("products"));
         program.add_argument("--orderbook_save_path").default_value(std::string("logs/orderbook_record"));
         program.add_argument("--trade_save_path").default_value(std::string("logs/trade_record"));
+        program.add_argument("--no-orderbook-log").flag();
+        program.add_argument("--no-public-trade-log").flag();
         program.add_argument("--orderbook_levels").scan<'i', int>().default_value(20);
         program.add_argument("--product_info_refresh_sec").scan<'i', int64_t>().default_value(int64_t{300});
         program.add_argument("--broadcast_host_address").default_value(std::string("0.0.0.0"));
@@ -86,6 +90,8 @@ struct ListenerConfig {
         products_db_base_path = program.get<std::string>("--products_db_base_path");
         orderbook_save_path = program.get<std::string>("--orderbook_save_path");
         trade_save_path = program.get<std::string>("--trade_save_path");
+        no_orderbook_log = program.get<bool>("--no-orderbook-log");
+        no_public_trade_log = program.get<bool>("--no-public-trade-log");
         orderbook_levels = program.get<int>("--orderbook_levels");
         product_info_refresh_sec = program.get<int64_t>("--product_info_refresh_sec");
         broadcast_host_address = program.get<std::string>("--broadcast_host_address");
@@ -121,6 +127,8 @@ struct ListenerConfig {
         s.get("products_db_base_path", products_db_base_path);
         s.get("orderbook_save_path", orderbook_save_path);
         s.get("trade_save_path", trade_save_path);
+        s.get("no_orderbook_log", no_orderbook_log);
+        s.get("no_public_trade_log", no_public_trade_log);
         s.get("orderbook_levels", orderbook_levels);
         s.get("product_info_refresh_sec", product_info_refresh_sec);
         s.get("broadcast_host_address", broadcast_host_address);

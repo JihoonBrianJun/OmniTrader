@@ -218,6 +218,8 @@ Logger::CsvLogger<TradeCsvSchema>* MarketListener::get_trade_logger(
 
 
 void MarketListener::log_orderbook_data(const OrderbookMsg& msg) {
+    if (config_.no_orderbook_log) return;   // before get_*_logger, so no file is opened either
+
     auto* csv = get_orderbook_logger(msg.product);
     auto local_tstamp = get_curr_tstamp_ns();
     // One update, one venue timestamp: repeated on every level's row the same way
@@ -241,6 +243,8 @@ void MarketListener::log_orderbook_data(const OrderbookMsg& msg) {
 
 
 void MarketListener::log_trade_data(const TradeMsg& msg) {
+    if (config_.no_public_trade_log) return;
+
     auto* csv = get_trade_logger(msg.product);
     auto local_tstamp = get_curr_tstamp_ns();
     csv->write_log(
