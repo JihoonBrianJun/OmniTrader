@@ -1,7 +1,7 @@
 {
   "strategy_params": {
-    "spread_const_bp": 7.5,
-    "skew_ratio": 2.25,
+    "spread_const_bp": 12.0,
+    "skew_ratio": 0.0,
     "use_spread_cap": false,
     "spread_cap_bp": 0.0,
     "use_bbo_cap_buffer": true,
