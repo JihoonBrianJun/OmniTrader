@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <fstream>
+#include <filesystem>
 #include <fmt/ranges.h>
 
 namespace Omni::Config {
@@ -38,6 +39,21 @@ nlohmann::json load_json_file(const std::string& file_path) {
             fmt::format("failed to parse {}: {}", file_path, e.what())
         );
     }
+}
+
+
+std::string named_log_path(const std::string& log_path, const std::string& name) {
+    if (name.empty()) return log_path;
+    std::filesystem::path path(log_path);
+    // The name goes between the directory and the file, not on either: the file keeps
+    // the service's own name so `trader.log` still reads as one.
+    return (path.parent_path() / name / path.filename()).string();
+}
+
+
+std::string named_save_path(const std::string& save_path, const std::string& name) {
+    if (name.empty()) return save_path;
+    return (std::filesystem::path(save_path) / name).string();
 }
 
 

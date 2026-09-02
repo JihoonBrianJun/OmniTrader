@@ -1,5 +1,6 @@
 {
   "market_config": {
+    "name": "0",
     "exchange": "kis",
     "min_tick_size": 1.0,
     "default_lot_size": 1.0,

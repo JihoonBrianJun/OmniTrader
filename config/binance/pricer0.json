@@ -1,5 +1,6 @@
 {
   "pricer_config": {
+    "name": "0",
     "fair_price_mode": "FACTOR",
     "products": [
         "BTCUSDC:futures",

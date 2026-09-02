@@ -40,6 +40,11 @@ using Task = std::variant<
 
 // Wiring/config consumed by the order handler and the order-gateway factories.
 struct TraderConfig {
+    // Identifies this instance: the launch config's file name with the service prefix
+    // stripped (trader1.json -> "1"). Becomes a directory level under log_path and the
+    // record save paths, so two traders never write to the same file.
+    std::string name = "";
+
     std::string exchange = "binance";
     std::string strategy_name = "Geuant";
     std::string region = "";
@@ -137,6 +142,7 @@ struct TraderConfig {
             .scan<'i', int64_t>().default_value(int64_t{5000});
         program.add_argument("--no_shutdown_market_flatten").flag();
         program.add_argument("--no_shutdown_reduce_only").flag();
+        program.add_argument("--name").default_value(std::string(""));
         program.add_argument("--order_record_save_path").default_value(std::string("logs/order_record"));
         program.add_argument("--order_decision_save_path").default_value(std::string("logs/order_decision"));
         program.add_argument("--timezone_minute_offset").scan<'i', int64_t>().default_value(int64_t{0});
@@ -182,12 +188,17 @@ struct TraderConfig {
         shutdown_flatten_timeout_ms = program.get<int64_t>("--shutdown_flatten_timeout_ms");
         shutdown_market_flatten = !program.get<bool>("--no_shutdown_market_flatten");
         shutdown_reduce_only = !program.get<bool>("--no_shutdown_reduce_only");
-        order_record_save_path = program.get<std::string>("--order_record_save_path");
-        order_decision_save_path = program.get<std::string>("--order_decision_save_path");
+        name = program.get<std::string>("--name");
+        order_record_save_path = Omni::Config::named_save_path(
+            program.get<std::string>("--order_record_save_path"), name
+        );
+        order_decision_save_path = Omni::Config::named_save_path(
+            program.get<std::string>("--order_decision_save_path"), name
+        );
         timezone_minute_offset = program.get<int64_t>("--timezone_minute_offset");
         market_end_intraday_minute = program.get<int64_t>("--market_end_intraday_minute");
         log_base_path = program.get<std::string>("--log_base_path");
-        log_path = program.get<std::string>("--log_path");
+        log_path = Omni::Config::named_log_path(program.get<std::string>("--log_path"), name);
     }
 
     // File-based alternative to init(): reads the same fields from the
@@ -247,6 +258,7 @@ struct TraderConfig {
         s.get("shutdown_flatten_timeout_ms", shutdown_flatten_timeout_ms);
         s.get("shutdown_market_flatten", shutdown_market_flatten);
         s.get("shutdown_reduce_only", shutdown_reduce_only);
+        s.get("name", name);
         s.get("order_record_save_path", order_record_save_path);
         s.get("order_decision_save_path", order_decision_save_path);
         s.get("timezone_minute_offset", timezone_minute_offset);
@@ -254,6 +266,9 @@ struct TraderConfig {
         s.get("log_base_path", log_base_path);
         s.get("log_path", log_path);
         s.done();
+        log_path = Omni::Config::named_log_path(log_path, name);
+        order_record_save_path = Omni::Config::named_save_path(order_record_save_path, name);
+        order_decision_save_path = Omni::Config::named_save_path(order_decision_save_path, name);
     }
 };
 

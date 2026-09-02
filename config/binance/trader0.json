@@ -1,5 +1,6 @@
 {
   "trader_config": {
+    "name": "0",
     "exchange": "binance",
     "strategy_name": "Geuant",
     "market_type": "derivatives",

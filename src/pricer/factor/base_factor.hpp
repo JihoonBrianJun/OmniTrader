@@ -18,6 +18,12 @@ namespace Omni::Pricer {
 // MarketConfig. Smoothing and clamping are handled here rather than re-implemented by
 // each factor, so an implementation only has to produce a raw multiplier.
 struct FactorConfig {
+    // Identifies the launch config this came from (factor0.json -> "0"). Read from
+    // JSON only: FactorConfig shares the pricer's argparse parser, which already
+    // registers --name for PricerConfig. Nothing here owns a path, so it is carried
+    // for identification rather than used.
+    std::string name = "";
+
     std::string factor_name = "Microprice";
 
     // EMA smoothing on the raw factor. 1.0 = no smoothing (use the raw value).
@@ -49,6 +55,7 @@ struct FactorConfig {
     // carries this alongside the chosen factor's own "factor_params" section.
     void parse_json(const nlohmann::json& doc) {
         Omni::Config::JsonSection s(doc, "factor_config");
+        s.get("name", name);
         s.get("factor_name", factor_name);
         s.get("ema_alpha", ema_alpha);
         s.get("cap_bp", cap_bp);

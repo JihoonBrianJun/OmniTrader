@@ -1,5 +1,6 @@
 {
   "factor_config": {
+    "name": "0",
     "factor_name": "Microprice",
     "ema_alpha": 1.0,
     "cap_bp": 20.0

@@ -35,6 +35,23 @@ std::vector<std::string> json_launch_paths(int argc, char* argv[]);
 nlohmann::json load_json_file(const std::string& file_path);
 
 
+// A launch config's `name` (trader0.json -> "0") slotted in as one more directory
+// level under the configured log location, so two instances of the same service each
+// own their output:
+//
+//     named_log_path("logs/trader/trader.log", "1") -> "logs/trader/1/trader.log"
+//     named_save_path("logs/order_record", "1")     -> "logs/order_record/1"
+//
+// The traders used to share one rotating log file this way, and each process's
+// rotation renamed over the other's backups. Deriving the directory from `name`
+// rather than spelling it out per file makes that collision impossible to write.
+//
+// An empty name returns the path unchanged, which is what a flag-based launch gets:
+// it has no config file and so no name to be known by.
+std::string named_log_path(const std::string& log_path, const std::string& name);
+std::string named_save_path(const std::string& save_path, const std::string& name);
+
+
 // One section of a launch-config document (e.g. the "listener_config" object).
 //
 // Individual fields are optional: a key that is absent leaves the struct's own

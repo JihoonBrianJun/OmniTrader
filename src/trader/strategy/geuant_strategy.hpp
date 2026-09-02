@@ -5,6 +5,12 @@
 namespace Omni::Trader {
 
 struct GeuantParams {
+    // Identifies the launch config this came from (strategy1.json -> "1"). Read from
+    // JSON only: the strategy shares the trader's argparse parser, which already
+    // registers --name for TraderConfig. Nothing here owns a path, so it is carried
+    // for identification rather than used.
+    std::string name = "";
+
     // Spread determiners
     double spread_const_bp = 0.0;
     double skew_ratio = 0.0;
@@ -78,6 +84,7 @@ struct GeuantParams {
     // the same fields init() does.
     void parse_json(const nlohmann::json& doc) {
         Omni::Config::JsonSection s(doc, "strategy_params");
+        s.get("name", name);
         s.get("spread_const_bp", spread_const_bp);
         s.get("skew_ratio", skew_ratio);
         s.get("use_spread_cap", use_spread_cap);

@@ -26,6 +26,11 @@ using ListenerEvent = std::variant<
 >;
 
 struct ListenerConfig {
+    // Identifies this instance: the launch config's file name with the service prefix
+    // stripped (listener0.json -> "0"). Becomes a directory level under log_path and
+    // the record save paths, so two listeners never write to the same file.
+    std::string name = "";
+
     std::string exchange = "binance";
     std::string region = "";
     std::string market_type = "derivatives";
@@ -62,6 +67,7 @@ struct ListenerConfig {
         program.add_argument("--products_db_base_path").default_value(std::string("products"));
         program.add_argument("--orderbook_save_path").default_value(std::string("logs/orderbook_record"));
         program.add_argument("--trade_save_path").default_value(std::string("logs/trade_record"));
+        program.add_argument("--name").default_value(std::string(""));
         program.add_argument("--no-orderbook-log").flag();
         program.add_argument("--no-public-trade-log").flag();
         program.add_argument("--orderbook_levels").scan<'i', int>().default_value(20);
@@ -88,8 +94,13 @@ struct ListenerConfig {
             product_specs.push_back(spec);
         }
         products_db_base_path = program.get<std::string>("--products_db_base_path");
-        orderbook_save_path = program.get<std::string>("--orderbook_save_path");
-        trade_save_path = program.get<std::string>("--trade_save_path");
+        name = program.get<std::string>("--name");
+        orderbook_save_path = Omni::Config::named_save_path(
+            program.get<std::string>("--orderbook_save_path"), name
+        );
+        trade_save_path = Omni::Config::named_save_path(
+            program.get<std::string>("--trade_save_path"), name
+        );
         no_orderbook_log = program.get<bool>("--no-orderbook-log");
         no_public_trade_log = program.get<bool>("--no-public-trade-log");
         orderbook_levels = program.get<int>("--orderbook_levels");
@@ -97,7 +108,7 @@ struct ListenerConfig {
         broadcast_host_address = program.get<std::string>("--broadcast_host_address");
         broadcast_port = static_cast<unsigned short>(program.get<int>("--broadcast_port"));
         domain_type = program.get<std::string>("--domain_type");
-        log_path = program.get<std::string>("--log_path");
+        log_path = Omni::Config::named_log_path(program.get<std::string>("--log_path"), name);
     }
 
     // File-based alternative to init(): reads the same fields from the
@@ -124,6 +135,7 @@ struct ListenerConfig {
             }
         }
         s.skip("products");
+        s.get("name", name);
         s.get("products_db_base_path", products_db_base_path);
         s.get("orderbook_save_path", orderbook_save_path);
         s.get("trade_save_path", trade_save_path);
@@ -136,6 +148,9 @@ struct ListenerConfig {
         s.get("domain_type", domain_type);
         s.get("log_path", log_path);
         s.done();
+        log_path = Omni::Config::named_log_path(log_path, name);
+        orderbook_save_path = Omni::Config::named_save_path(orderbook_save_path, name);
+        trade_save_path = Omni::Config::named_save_path(trade_save_path, name);
     }
 };
 

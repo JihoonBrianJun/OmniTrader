@@ -33,6 +33,12 @@ namespace Omni::Trader {
 // `default_lot_size` is named for what it is: the default quantity unit, shared by
 // every product, not any one product's lot size.
 struct MarketConfig {
+    // Identifies the launch config this came from (market0.json -> "0"). Read from
+    // JSON only: MarketConfig shares the trader's argparse parser, which already
+    // registers --name for TraderConfig. Nothing here owns a path, so it is carried
+    // for identification rather than used.
+    std::string name = "";
+
     // Defaulted to the same values --min_tick_size/--default_lot_size default to, so
     // a launch config that omits them fails in OrderHandler with the usual "missing
     // unit" error rather than on an uninitialized read.
@@ -72,6 +78,7 @@ struct MarketConfig {
     // discover at order submission.
     void parse_json(const nlohmann::json& doc, const std::string& default_exchange = "") {
         Omni::Config::JsonSection s(doc, "market_config");
+        s.get("name", name);
         s.get("min_tick_size", min_tick_size);
         s.get("default_lot_size", default_lot_size);
         s.get("exchange", exchange);

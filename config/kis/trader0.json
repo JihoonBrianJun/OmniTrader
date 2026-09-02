@@ -1,5 +1,6 @@
 {
   "trader_config": {
+    "name": "0",
     "exchange": "kis",
     "strategy_name": "Geuant",
     "region": "korea",

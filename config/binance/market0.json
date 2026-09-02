@@ -1,5 +1,6 @@
 {
   "market_config": {
+    "name": "0",
     "exchange": "binance",
     "min_tick_size": 1e-4,
     "default_lot_size": 1e-4,

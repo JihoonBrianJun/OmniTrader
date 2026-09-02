@@ -1,5 +1,6 @@
 {
   "pricer_config": {
+    "name": "0",
     "fair_price_mode": "MID",
     "products": ["101W12"],
     "broadcast_host_address": "0.0.0.0",

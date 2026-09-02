@@ -29,6 +29,11 @@ using Task = std::variant<
 // (factor/base_factor.hpp), registered alongside this one, mirroring how the trader
 // registers TraderConfig and MarketConfig side by side.
 struct PricerConfig {
+    // Identifies this instance: the launch config's file name with the service prefix
+    // stripped (pricer0.json -> "0"). Becomes a directory level under log_path, so
+    // two pricers never write to the same file.
+    std::string name = "";
+
     // How fair price is derived. MID needs no factor and no market state beyond the
     // book, so a pricer with no arguments at all is a working mid publisher.
     FairPriceMode mode = FairPriceMode::MID;
@@ -70,6 +75,7 @@ struct PricerConfig {
         program.add_argument("--timezone_minute_offset").scan<'i', int64_t>().default_value(int64_t{0});
         program.add_argument("--market_end_intraday_minute")
             .scan<'i', int64_t>().default_value(int64_t{-1});
+        program.add_argument("--name").default_value(std::string(""));
         program.add_argument("--no-pricer-log").flag();
         program.add_argument("--log_path").default_value(std::string("logs/pricer/pricer.log"));
     }
@@ -88,7 +94,8 @@ struct PricerConfig {
         timezone_minute_offset = program.get<int64_t>("--timezone_minute_offset");
         market_end_intraday_minute = program.get<int64_t>("--market_end_intraday_minute");
         no_pricer_log = program.get<bool>("--no-pricer-log");
-        log_path = program.get<std::string>("--log_path");
+        name = program.get<std::string>("--name");
+        log_path = Omni::Config::named_log_path(program.get<std::string>("--log_path"), name);
     }
 
     // File-based alternative to init(): reads the same fields from the
@@ -120,8 +127,10 @@ struct PricerConfig {
         s.get("timezone_minute_offset", timezone_minute_offset);
         s.get("market_end_intraday_minute", market_end_intraday_minute);
         s.get("no_pricer_log", no_pricer_log);
+        s.get("name", name);
         s.get("log_path", log_path);
         s.done();
+        log_path = Omni::Config::named_log_path(log_path, name);
     }
 };
 

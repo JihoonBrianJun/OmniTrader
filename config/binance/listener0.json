@@ -1,5 +1,6 @@
 {
   "listener_config": {
+    "name": "0",
     "exchange": "binance",
     "market_type": "derivatives",
     "domain_type": "real",
