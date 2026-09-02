@@ -210,7 +210,9 @@ void Pricer::publish_fair_price(const std::string& product) {
     }
 
     if (!state.book_seen) {
-        LOG_INFO(logger_, "[FairPrice] {} skipped: no book yet", product);
+        if (!config_.no_pricer_log) {
+            LOG_INFO(logger_, "[FairPrice] {} skipped: no book yet", product);
+        }
         return;
     }
 
@@ -220,7 +222,9 @@ void Pricer::publish_fair_price(const std::string& product) {
     auto result = state.fair_price->compute(state.market);
 
     if (!result.priceable()) {
-        LOG_INFO(logger_, "[FairPrice] {} skipped: book not two-sided", product);
+        if (!config_.no_pricer_log) {
+            LOG_INFO(logger_, "[FairPrice] {} skipped: book not two-sided", product);
+        }
         return;
     }
 
@@ -241,6 +245,9 @@ void Pricer::publish_fair_price(const std::string& product) {
         return;
     }
     tcp_server_->broadcast_to_subscribers(product, json_buffer);
+    // One line per product per publish tick: at the default interval this is the whole
+    // file, so no_pricer_log turns it off without touching the broadcast above.
+    if (config_.no_pricer_log) return;
     LOG_INFO(
         logger_, "[FairPrice] {} fair={} mid={} factor={} bbid={}@{} bask={}@{}",
         product, result.fair_price, result.mid_price, result.factor,

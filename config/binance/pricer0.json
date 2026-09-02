@@ -12,6 +12,7 @@
     "publish_interval_ms": 20,
     "timezone_minute_offset": 0,
     "market_end_intraday_minute": -1,
+    "no_pricer_log": true,
     "log_path": "logs/pricer/pricer.log"
   }
 }

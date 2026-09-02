@@ -49,6 +49,9 @@ struct PricerConfig {
     // Loop-control / logging.
     long timezone_minute_offset = 0;
     long market_end_intraday_minute = -1;
+    // Silences the per-publish [FairPrice] lines, which are one per product per tick
+    // and dominate the file. Startup, subscription and warning lines are unaffected.
+    bool no_pricer_log = false;
     std::string log_path = "logs/pricer/pricer.log";
 
     static void set_parser(argparse::ArgumentParser& program) {
@@ -67,6 +70,7 @@ struct PricerConfig {
         program.add_argument("--timezone_minute_offset").scan<'i', int64_t>().default_value(int64_t{0});
         program.add_argument("--market_end_intraday_minute")
             .scan<'i', int64_t>().default_value(int64_t{-1});
+        program.add_argument("--no-pricer-log").flag();
         program.add_argument("--log_path").default_value(std::string("logs/pricer/pricer.log"));
     }
 
@@ -83,6 +87,7 @@ struct PricerConfig {
         publish_interval_ms = program.get<int64_t>("--publish_interval_ms");
         timezone_minute_offset = program.get<int64_t>("--timezone_minute_offset");
         market_end_intraday_minute = program.get<int64_t>("--market_end_intraday_minute");
+        no_pricer_log = program.get<bool>("--no-pricer-log");
         log_path = program.get<std::string>("--log_path");
     }
 
@@ -114,6 +119,7 @@ struct PricerConfig {
         s.get("publish_interval_ms", publish_interval_ms);
         s.get("timezone_minute_offset", timezone_minute_offset);
         s.get("market_end_intraday_minute", market_end_intraday_minute);
+        s.get("no_pricer_log", no_pricer_log);
         s.get("log_path", log_path);
         s.done();
     }
