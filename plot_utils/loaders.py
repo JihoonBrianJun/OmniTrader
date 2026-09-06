@@ -55,7 +55,7 @@ _TS = "local_tstamp"
 # because the repeated-header rows above would otherwise poison read_csv's
 # inference for the whole file.
 _DECISION_NUMERIC = (
-    "local_tstamp", "bbid", "bask", "mid", "fair", "factor",
+    "local_tstamp", "bbid", "bask", "mid", "fair", "factor", "forward_vol",
     "position_lots", "outstanding", "bid_price", "ask_price",
 )
 _RECORD_NUMERIC = ("local_tstamp", "server_tstamp", "cid", "price", "qty")
@@ -169,7 +169,7 @@ class LogPaths:
 
 
 def load_order_decision(paths: LogPaths) -> pd.DataFrame:
-    """Columns: local_tstamp, bbid, bask, mid, fair, factor, position_lots,
+    """Columns: local_tstamp, bbid, bask, mid, fair, factor, forward_vol, position_lots,
     outstanding, bid_price, ask_price, time, date.
 
     One row per decision that reached the strategy. This is the live equivalent

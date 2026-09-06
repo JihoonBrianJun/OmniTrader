@@ -45,6 +45,13 @@ struct FairPriceResult {
     // The factor folded into fair_price, or NaN if none was (non-FACTOR mode, or the
     // factor was not computable). Published purely as a diagnostic.
     double factor = NAN;
+    // The factor's view of how wide the market is about to be, as a multiplier on the
+    // strategy's quoted half-spread: 1.0 means "as configured", 2.0 "twice as wide".
+    // Only FACTOR mode produces one -- MID and VWAP carry no state to estimate it
+    // from and leave this at 1.0, which is exactly the pre-existing behaviour. It is
+    // also left at 1.0 whenever the factor was not computable, so a fallback to plain
+    // mid falls back on the spread as well rather than scaling by a stale estimate.
+    double forward_vol = 1.0;
 
     bool priceable() const { return !std::isnan(fair_price); }
 };

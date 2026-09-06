@@ -300,8 +300,9 @@ struct OrderRecordCsvSchema {
 // no row; the trader log says why.
 struct OrderDecisionCsvSchema {
     static constexpr char const* header =
-        "local_tstamp,bbid,bask,mid,fair,factor,position_lots,outstanding,bid_price,ask_price";
-    static constexpr char const* format = "{},{},{},{},{},{},{},{},{},{}";
+        "local_tstamp,bbid,bask,mid,fair,factor,forward_vol,"
+        "position_lots,outstanding,bid_price,ask_price";
+    static constexpr char const* format = "{},{},{},{},{},{},{},{},{},{},{}";
 };
 
 } // namespace Omni::Trader

@@ -17,6 +17,11 @@ struct PriceInfo {
     // none (the pricer isn't in FACTOR mode, or its fair price was unavailable and we
     // fell back to mid). Logged so a fallback is visible as such.
     double applied_factor = NAN;
+    // The pricer's spread multiplier for this tick, applied by the strategy to its
+    // configured half-spread. 1.0 -- quote as configured -- whenever the pricer is not
+    // in FACTOR mode, its factor was not computable, or its fair price did not reach
+    // us in time, so the spread falls back alongside the price it is quoted around.
+    double forward_vol = 1.0;
 
     // This product's real price increment on the venue, from the listener's
     // product_info, falling back to the global --min_tick_size until one arrives.
@@ -48,6 +53,7 @@ struct FairPriceState {
     int64_t ts = 0;              // ns, stamped by the pricer
     double fair_price = NAN;     // NaN until the first one arrives
     double factor = NAN;         // NaN unless the pricer runs in FACTOR mode
+    double forward_vol = 1.0;    // 1.0 unless the pricer's factor estimated one
 };
 
 } // namespace Omni::Trader

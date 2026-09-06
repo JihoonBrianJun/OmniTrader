@@ -162,10 +162,13 @@ struct ProductInfoMsg {
 // to age the value out. `factor` is set only when the pricer runs in FACTOR mode
 // (fair = factor * mid, matching orderbook-backtest's pre-computed `FactorTick`) and
 // is carried purely so the trader can log which factor produced the price it used.
+// `forward_vol` also comes from FACTOR mode alone, but unlike `factor` it is acted
+// on: it widens or tightens the strategy's quoted spread.
 struct FairPriceData {
     int64_t ts = 0;
     std::optional<double> fair_price = std::nullopt;
     std::optional<double> factor = std::nullopt;
+    double forward_vol = 1.0;
 };
 struct FairPriceMsg {
     std::string feed = "fair_price";

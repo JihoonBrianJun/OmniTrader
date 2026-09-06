@@ -234,7 +234,8 @@ void Pricer::publish_fair_price(const std::string& product) {
             .ts = state.market.ts,
             .fair_price = result.fair_price,
             .factor = std::isnan(result.factor)
-                ? std::nullopt : std::optional<double>(result.factor)
+                ? std::nullopt : std::optional<double>(result.factor),
+            .forward_vol = result.forward_vol
         }
     };
 
@@ -249,8 +250,8 @@ void Pricer::publish_fair_price(const std::string& product) {
     // file, so no_pricer_log turns it off without touching the broadcast above.
     if (config_.no_pricer_log) return;
     LOG_INFO(
-        logger_, "[FairPrice] {} fair={} mid={} factor={} bbid={}@{} bask={}@{}",
-        product, result.fair_price, result.mid_price, result.factor,
+        logger_, "[FairPrice] {} fair={} mid={} factor={} forward_vol={} bbid={}@{} bask={}@{}",
+        product, result.fair_price, result.mid_price, result.factor, result.forward_vol,
         state.market.bbid_price, state.market.bbid_qty,
         state.market.bask_price, state.market.bask_qty
     );

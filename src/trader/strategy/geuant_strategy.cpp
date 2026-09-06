@@ -20,16 +20,18 @@ double GeuantStrategy::clip_delta(double delta) {
 }
 
 
-double GeuantStrategy::delta_bid(double position_limit_usage) {
+double GeuantStrategy::delta_bid(double forward_vol, double position_limit_usage) {
     return clip_delta(
-        params_.spread_const_bp * (1.0 + params_.skew_ratio * position_limit_usage)
+        params_.spread_const_bp * forward_vol
+            * (1.0 + params_.skew_ratio * position_limit_usage)
     );
 }
 
 
-double GeuantStrategy::delta_ask(double position_limit_usage) {
+double GeuantStrategy::delta_ask(double forward_vol, double position_limit_usage) {
     return clip_delta(
-        params_.spread_const_bp * (1.0 - params_.skew_ratio * position_limit_usage)
+        params_.spread_const_bp * forward_vol
+            * (1.0 - params_.skew_ratio * position_limit_usage)
     );
 }
 
@@ -206,8 +208,8 @@ void GeuantStrategy::make_decision(
     auto position_limit_usage = params_.position_in_dollar
         ? to_double_qty(position_in_lots) * price_info.mid_price / params_.position_limit_in_dollar
         : to_double_qty(position_in_lots) / to_double_qty(params_.position_limit_in_lots);
-    auto base_delta_bid = delta_bid(position_limit_usage);
-    auto base_delta_ask = delta_ask(position_limit_usage);
+    auto base_delta_bid = delta_bid(price_info.forward_vol, position_limit_usage);
+    auto base_delta_ask = delta_ask(price_info.forward_vol, position_limit_usage);
 
     for (size_t order_idx = 0; order_idx < params_.order_num; ++order_idx) {
         // order_interval_ticks likewise counts this product's ticks.

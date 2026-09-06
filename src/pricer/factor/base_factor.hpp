@@ -79,6 +79,12 @@ public:
 
     virtual std::optional<double> compute(const MarketState& state) = 0;
 
+    // How wide the market is about to be, relative to normal, as of the last
+    // compute(). Multiplies the strategy's configured half-spread, so 1.0 -- the
+    // default every factor gets until it implements one -- quotes as configured.
+    // Read only after a compute() that returned a value.
+    virtual double forward_vol() const { return 1.0; }
+
 protected:
     double ema_alpha_, cap_bp_;
 

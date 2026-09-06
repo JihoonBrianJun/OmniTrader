@@ -532,6 +532,7 @@ void OrderHandler::log_order_decision(
         to_double_price(price_info.bbid_price_in_min_ticks),
         to_double_price(price_info.bask_price_in_min_ticks),
         price_info.mid_price, price_info.fair_price, price_info.applied_factor,
+        price_info.forward_vol,
         state.position_in_lots,
         static_cast<int64_t>(state.outstanding_orders.size()),
         bid_price, ask_price
@@ -692,10 +693,15 @@ void OrderHandler::on_fair_price(const std::string& product, const FairPriceData
     // A price-less tick is recorded as NaN so we fall back to mid rather than reuse
     // the previous value. `factor` is only ever set when the pricer runs in FACTOR
     // mode, and is carried for logging alone.
+    // forward_vol reaches the strategy's spread rather than just its logs, so a
+    // non-positive or non-finite one off the wire is dropped for the neutral 1.0
+    // instead of collapsing or poisoning the quoted width.
+    bool vol_usable = std::isfinite(data.forward_vol) && data.forward_vol > 0.0;
     it->second.fair_price = FairPriceState{
         .ts = data.ts,
         .fair_price = data.fair_price.value_or(NAN),
-        .factor = data.factor.value_or(NAN)
+        .factor = data.factor.value_or(NAN),
+        .forward_vol = vol_usable ? data.forward_vol : 1.0
     };
 }
 
@@ -704,6 +710,7 @@ void OrderHandler::build_price_info(const ProductState& state, PriceInfo& price_
     price_info.bbid_price_in_min_ticks = state.l1.bbid_price_in_min_ticks;
     price_info.bask_price_in_min_ticks = state.l1.bask_price_in_min_ticks;
     price_info.applied_factor = NAN;
+    price_info.forward_vol = 1.0;
 
     // Set before any early return, so the strategy never sees an unset increment.
     // min_tick_size_ is guaranteed positive by the constructor, so this always is.
@@ -731,6 +738,7 @@ void OrderHandler::build_price_info(const ProductState& state, PriceInfo& price_
     if (usable && std::isfinite(state.fair_price.factor)) {
         price_info.applied_factor = state.fair_price.factor;
         price_info.fair_price = price_info.applied_factor * price_info.mid_price;
+        price_info.forward_vol = state.fair_price.forward_vol;
     } else {
         price_info.fair_price = price_info.mid_price;
     }
@@ -854,6 +862,7 @@ void OrderHandler::update_orders(const std::string& product, bool do_liquidate) 
         to_double_price(price_info.bbid_price_in_min_ticks),
         to_double_price(price_info.bask_price_in_min_ticks),
         price_info.mid_price, price_info.fair_price, price_info.applied_factor,
+        price_info.forward_vol,
         state.position_in_lots, state.outstanding_orders.size(),
         format_positions()
     );

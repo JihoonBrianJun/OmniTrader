@@ -126,8 +126,12 @@ private:
     GeuantParams params_;
 
     double clip_delta(double delta);
-    double delta_bid(double position_limit_usage);
-    double delta_ask(double position_limit_usage);
+    // forward_vol scales the configured half-spread before the inventory skew is
+    // applied, so a wider forward market widens both sides symmetrically and the skew
+    // stays a proportion of whatever width that leaves. The spread cap in clip_delta
+    // is still the last word, so a large multiplier cannot quote past it.
+    double delta_bid(double forward_vol, double position_limit_usage);
+    double delta_ask(double forward_vol, double position_limit_usage);
 
     int32_t get_order_qty_in_lots(int64_t price_in_min_ticks, int32_t qty_limit_in_lots);
 
