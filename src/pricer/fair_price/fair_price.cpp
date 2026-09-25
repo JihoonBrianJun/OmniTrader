@@ -50,13 +50,13 @@ FairPriceResult FairPriceCalculator::compute(const MarketState& state) {
             if (factor.has_value() && std::isfinite(factor.value())) {
                 result.factor = factor.value();
                 result.fair_price = result.factor * result.mid_price;
-                auto forward_vol = factor_->forward_vol();
+                auto forward_vol_bp = factor_->forward_vol_bp();
                 // Guarded rather than trusted: a non-positive or non-finite estimate
                 // would collapse or poison the strategy's spread, and quoting at the
                 // configured width is the right thing to do when the estimate is not
                 // usable.
-                if (std::isfinite(forward_vol) && forward_vol > 0.0) {
-                    result.forward_vol = forward_vol;
+                if (std::isfinite(forward_vol_bp) && forward_vol_bp > 0.0) {
+                    result.forward_vol_bp = forward_vol_bp;
                 }
             } else {
                 result.fair_price = result.mid_price;

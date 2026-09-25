@@ -51,7 +51,7 @@ struct FairPriceResult {
     // from and leave this at 1.0, which is exactly the pre-existing behaviour. It is
     // also left at 1.0 whenever the factor was not computable, so a fallback to plain
     // mid falls back on the spread as well rather than scaling by a stale estimate.
-    double forward_vol = 1.0;
+    double forward_vol_bp = 1.0;
 
     bool priceable() const { return !std::isnan(fair_price); }
 };

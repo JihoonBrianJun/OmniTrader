@@ -300,7 +300,7 @@ struct OrderRecordCsvSchema {
 // no row; the trader log says why.
 struct OrderDecisionCsvSchema {
     static constexpr char const* header =
-        "local_tstamp,bbid,bask,mid,fair,factor,forward_vol,"
+        "local_tstamp,bbid,bask,mid,fair,factor,forward_vol_bp,"
         "position_lots,outstanding,bid_price,ask_price";
     static constexpr char const* format = "{},{},{},{},{},{},{},{},{},{},{}";
 };
